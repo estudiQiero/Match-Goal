@@ -20,6 +20,7 @@ export class Player {
     this.mustPass = false;             // en saques: no puede moverse con el balón
     this.anim = Math.random() * 10;
     this.kickAnim = 0;
+    this.z = 0; this.vz = 0;           // altura de los pies (salto)
     this.human = null;                 // controlador humano si lo maneja una persona
     this.skill = 1;
   }
@@ -28,6 +29,7 @@ export class Player {
 
   place(x, y) {
     this.x = x; this.y = y; this.vx = 0; this.vy = 0;
+    this.z = 0; this.vz = 0;
     this.state = 'normal'; this.stateT = 0;
   }
 
@@ -56,7 +58,14 @@ export class Player {
       if (this.stateT <= 0) this.state = 'normal';
     }
 
-    if (this.state === 'slide' || this.state === 'dive') {
+    if (this.state === 'jump') {
+      // En el aire no se puede cambiar de dirección: sigue con el impulso que llevaba.
+      this.vz -= 9.81 * dt;
+      this.z += this.vz * dt;
+      if (this.z <= 0) { this.z = 0; this.vz = 0; this.state = 'normal'; }
+      const k = Math.exp(-0.6 * dt);
+      this.vx *= k; this.vy *= k;
+    } else if (this.state === 'slide' || this.state === 'dive') {
       const k = Math.exp(-3 * dt);
       this.vx *= k; this.vy *= k;
     } else if (this.state === 'fallen') {
@@ -159,6 +168,18 @@ export class Player {
     this.stateT = t;
     this.hasBall = false;
   }
+
+  // Salto para cabecear (o para atrapar, el portero). Sube ~0,8 m y cae en ~0,8 s.
+  jump(power = 1) {
+    if (this.state !== 'normal' || this.hasBall || this.z > 0) return false;
+    this.state = 'jump';
+    this.stateT = 0;
+    this.vz = PLAYER.jumpSpeed * (0.75 + 0.25 * power);
+    return true;
+  }
+
+  // Altura de la cabeza (lo más alto a lo que llega cabeceando).
+  get headZ() { return this.z + PLAYER.height + 0.15; }
 
   dive(dirY, speed = 6) {
     if (this.state !== 'normal') return;

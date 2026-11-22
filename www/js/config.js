@@ -1,10 +1,9 @@
 // Constantes del juego. Unidades: metros, segundos.
 
 export const PITCH = {
-  // Más pequeño que uno real (105 × 68): con la cámara cerca, se corre menos y hay más juego.
-  // Porterías, áreas y círculo central mantienen su medida real.
-  length: 84,
-  width: 54,
+  // Medidas reales de un campo reglamentario.
+  length: 105,
+  width: 68,
   goalWidth: 7.32,
   goalHeight: 2.44,
   goalDepth: 2,
@@ -39,6 +38,8 @@ export const PLAYER = {
   slideTime: 0.55,
   slideSpeed: 10,
   fallTime: 1.0,
+  jumpSpeed: 4.0,        // velocidad de despegue del salto (≈ 0,8 m de altura)
+  headReach: 0.9,        // distancia horizontal a la que llega de cabeza
 };
 
 export const KICK = {

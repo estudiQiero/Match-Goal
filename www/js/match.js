@@ -207,13 +207,13 @@ export class Match {
     const ball = this.ball;
     const p = ball.owner;
     if (!p) return;
-    if (p.state !== 'normal' && p.state !== 'dive') { ball.owner = null; p.hasBall = false; return; }
+    if (p.state !== 'normal' && p.state !== 'dive' && p.state !== 'jump') { ball.owner = null; p.hasBall = false; return; }
     const off = p.isGK ? 0.35 : 0.55;
     const tx = p.x + p.fx * off, ty = p.y + p.fy * off;
     const k = Math.min(1, dt * 16);
     ball.x += (tx - ball.x) * k;
     ball.y += (ty - ball.y) * k;
-    ball.z = p.isGK && !p.mustPass ? 1.1 : 0;
+    ball.z = p.isGK && !p.mustPass ? 1.1 + p.z : 0;
     ball.vx = p.vx; ball.vy = p.vy; ball.vz = 0;
     ball.spin = 0;
   }
@@ -266,6 +266,8 @@ export class Match {
 
     if (ball.owner || ball.inNet) return;
 
+    this.aiJumps();
+
     // Balón suelto: control, despeje, rebote o parada.
     let best = null, bestD = Infinity;
     for (const p of players) {
@@ -273,17 +275,22 @@ export class Match {
       const d = dist(p.x, p.y, ball.x, ball.y);
       const gkHands = p.isGK && this.inOwnBox(p);
       const reach = gkHands ? (p.state === 'dive' ? 1.8 : 1.1) : PLAYER.controlDist;
-      const maxZ = gkHands ? 2.7 : 0.6;
+      // El portero llega con las manos más arriba si salta.
+      const maxZ = gkHands ? 2.7 + p.z : 0.6;
       if (p.state === 'fallen' || (p.state === 'slide')) continue;
-      if (d < reach && ball.z < maxZ && d < bestD) { best = p; bestD = d; }
+      const rel = ball.z - p.z;            // altura del balón respecto a los pies
+      const airborne = p.state === 'jump';
+      // En el aire, un jugador de campo no puede controlar un balón con el pie.
+      if (d < reach && ball.z < maxZ && d < bestD && (!airborne || gkHands)) { best = p; bestD = d; }
 
-      // Cabezazos y voleas automáticos de la IA.
-      if (!p.human && !p.isGK && p.state === 'normal' && d < 0.95 && ball.z >= 0.6 && ball.z < 2.8) {
+      // Cabezazos y voleas automáticos de la IA (también saltando).
+      if (!p.human && !p.isGK && (p.state === 'normal' || airborne) &&
+          d < PLAYER.headReach && rel >= 0.6 && ball.z < p.headZ) {
         this.aiAerial(p);
         return;
       }
       // Rebote en el cuerpo.
-      if (d < PLAYER.radius + BALL.radius && ball.z < PLAYER.height && !gkHands) {
+      if (d < PLAYER.radius + BALL.radius && rel > -0.1 && rel < PLAYER.height && !gkHands) {
         const nx = (ball.x - p.x) / (d || 1), ny = (ball.y - p.y) / (d || 1);
         const rvx = ball.vx - p.vx, rvy = ball.vy - p.vy;
         const vn = rvx * nx + rvy * ny;
@@ -341,6 +348,28 @@ export class Match {
     }
   }
 
+  // La IA salta si el balón le va a pasar por encima de la cabeza pero a su alcance saltando.
+  // Calcula dónde estará el balón cuando le llegue y salta con el tiempo justo.
+  aiJumps() {
+    const ball = this.ball;
+    const standHead = PLAYER.height + 0.15;
+    for (const p of this.players) {
+      if (p.human || p.state !== 'normal' || p.z > 0) continue;
+      if (p.isGK && !this.inOwnBox(p)) continue;
+      const dx = p.x - ball.x, dy = p.y - ball.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 3) continue;
+      // Velocidad del balón hacia el jugador y tiempo hasta que llegue.
+      const vTo = (ball.vx * dx + ball.vy * dy) / (d || 1);
+      const t = d < 0.6 ? 0 : d / Math.max(vTo, 0.5);
+      if (t > 0.4) continue;
+      const zAt = ball.z + ball.vz * t - 4.905 * t * t;
+      const reachTop = p.isGK ? 2.7 + 0.8 : standHead + 0.8;
+      const reachLow = p.isGK ? 2.5 : standHead - 0.1;
+      if (zAt > reachLow && zAt < reachTop && Math.random() < 0.85 * p.skill) p.jump(1);
+    }
+  }
+
   aiAerial(p) {
     const ball = this.ball;
     const t = p.team;
@@ -348,7 +377,7 @@ export class Match {
     let dx, dy;
     if (attacking) { dx = t.oppGoalX - p.x; dy = CY + (Math.random() - 0.5) * 6 - p.y; }
     else { dx = t.dir * 10; dy = (p.y < CY ? -1 : 1) * 4 + (Math.random() - 0.5) * 8; }
-    const type = ball.z > 1.3 ? 'header' : 'volley';
+    const type = ball.z - p.z > 1.3 ? 'header' : 'volley';
     p.kick(ball, dx, dy, attacking ? 0.85 : 0.7, type);
     this.onKick(p, attacking ? 'shot' : 'ground');
   }

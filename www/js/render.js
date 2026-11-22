@@ -10,16 +10,34 @@ const WALK_MAX = 3.4;
 const STRIDE = { andar: 1.5, correr: 2.4 };
 
 // Granitos del césped: posiciones fijas en el campo (y algo fuera), repartidas al azar con semilla.
+// Números al azar repetibles (mulberry32). Con enteros de 32 bits: un generador
+// que multiplique números grandes en coma flotante pierde precisión y se repite enseguida.
+function seeded(a) {
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 const GRAIN = (() => {
-  let seed = 12345;
-  const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296);
+  const rnd = seeded(12345);
   const out = [];
-  for (let i = 0; i < 26000; i++) {
+  // Misma densidad sea cual sea el tamaño del campo (~26 granitos por m²).
+  // Tipos: 0 brizna oscura (2 px), 1 punto oscuro, 2 punto claro, 3 mata clara (2 px, punta más clara).
+  const n = Math.round(26 * (PITCH.length + 12) * (PITCH.width + 12));
+  for (let i = 0; i < n; i++) {
     const t = rnd();
-    out.push([-6 + rnd() * (PITCH.length + 12), -6 + rnd() * (PITCH.width + 12), t < 0.45 ? 0 : t < 0.85 ? 1 : 2, rnd()]);
+    out.push([-6 + rnd() * (PITCH.length + 12), -6 + rnd() * (PITCH.width + 12),
+      t < 0.35 ? 0 : t < 0.65 ? 1 : t < 0.85 ? 2 : 3, rnd()]);
   }
-  return out;
+  // Agrupados por metro de x: así cada fotograma solo se miran los de la zona visible.
+  const buckets = Array.from({ length: Math.ceil(PITCH.length + 12) + 1 }, () => []);
+  for (const g of out) buckets[Math.floor(g[0] + 6)].push(g);
+  return buckets;
 })();
+
 
 const L = PITCH.length, W = PITCH.width, CY = W / 2;
 const HUMAN_COLORS = { 1: '#ffd23f', 2: '#4fd1ff' };
@@ -125,7 +143,7 @@ export class Renderer {
     const b = match.ball;
     // Sombras: se pintan en la capa de píxeles del campo (ver pixelShadows).
     const shadows = [];
-    for (const p of [...match.players, ref]) if (p.y < near) shadows.push([p.x, p.y, 0.42, 0.30]);
+    for (const p of [...match.players, ref]) if (p.y < near) shadows.push([p.x, p.y, 0.42 * (1 - (p.z || 0) * 0.2), 0.30 - (p.z || 0) * 0.08]);
     // La del balón se hace más pequeña y tenue cuanto más alto va (a 4–5 m, menos de la mitad).
     if (b.y < near) shadows.push([b.x, b.y, 0.22 * Math.max(0.45, 1 - b.z * 0.12), Math.max(0.1, 0.30 - b.z * 0.04)]);
     this.wearMap = match.wear;
@@ -143,6 +161,7 @@ export class Renderer {
     for (const it of items) it.draw();
 
     for (const h of humans) if (h.player && h.player.y < near) this.humanMarker(h);
+    this.edgeDots(match);
     this.hud(match, humans);
   }
 
@@ -242,7 +261,10 @@ export class Renderer {
   grassGrain(img) {
     const d = img.data, w = img.width, h = img.height;
     const near = this.nearY, hit = new Uint8Array(w * h);
-    for (const [gx, gy, kind, u] of GRAIN) {
+    // Franja de x visible: la más ancha es la del fondo del campo (allí cabe más campo en pantalla).
+    const half = (this.w / 2) / this.P(this.camX, -6)[2] + 1;
+    const b0 = Math.max(0, Math.floor(this.camX - half + 6)), b1 = Math.min(GRAIN.length - 1, Math.floor(this.camX + half + 6));
+    for (let bi = b0; bi <= b1; bi++) for (const [gx, gy, kind, u] of GRAIN[bi]) {
       if (gy > near) continue;
       const [sx, sy, k] = this.P(gx, gy);
       // A lo lejos cada píxel cubre más césped: se descartan granitos para que la densidad
@@ -251,10 +273,13 @@ export class Renderer {
       const x = Math.floor(sx / PIXEL), y = Math.floor(sy / PIXEL);
       if (x < 0 || y < 0 || x >= w || y >= h || hit[y * w + x]) continue;
       hit[y * w + x] = 1;
-      const i = (y * w + x) * 4, f = kind === 0 ? 0.84 : kind === 1 ? 0.9 : 1.07;
+      const i = (y * w + x) * 4, f = kind === 0 ? 0.8 : kind === 1 ? 0.87 : kind === 2 ? 1.1 : 1.08;
       d[i] *= f; d[i + 1] *= f; d[i + 2] *= f;
-      // Algunos son briznas de dos píxeles.
-      if (kind === 0 && y > 0) { const k = i - w * 4; d[k] *= 0.92; d[k + 1] *= 0.92; d[k + 2] *= 0.92; }
+      // Briznas de dos píxeles: la oscura se apaga hacia arriba; la mata clara tiene la punta más clara.
+      if (y > 0 && (kind === 0 || kind === 3)) {
+        const k = i - w * 4, g = kind === 0 ? 0.88 : 1.16;
+        d[k] = Math.min(255, d[k] * g); d[k + 1] = Math.min(255, d[k + 1] * g); d[k + 2] = Math.min(255, d[k + 2] * g);
+      }
     }
   }
 
@@ -473,7 +498,9 @@ export class Renderer {
 
     c.save();
     // Pies en el punto del suelo, ajustados a píxel entero para que el pixel art no se emborrone.
-    c.translate(Math.round(x), Math.round(y) - bob * PIXEL);
+    // Saltando, el dibujo sube (a la escala de los sprites) y la sombra se queda en el suelo.
+    const lift = Math.round((p.z || 0) * this.s0 / PIXEL) * PIXEL;
+    c.translate(Math.round(x), Math.round(y) - bob * PIXEL - lift);
     if (p.state === 'slide') c.rotate(-face * 1.2);
     else if (p.state === 'fallen') c.rotate(face * 1.45);
     else if (p.state === 'dive') { c.translate(0, -0.5 * u); c.rotate((p.vy > 0 ? 1 : -1) * face * 1.3); }
@@ -546,6 +573,43 @@ export class Renderer {
       c.font = `700 ${Math.max(10, Math.round(u * 0.28))}px system-ui, sans-serif`;
       c.textAlign = 'center'; c.textBaseline = 'bottom';
       c.fillText(h.charge.type === 'loft' ? 'ALTO' : 'RASO', x, by - 3);
+    }
+  }
+
+  // ---------- Indicadores en los bordes ----------
+
+  // Jugadores fuera de cámara: un punto redondo con un contorno verde oscuro sutil, del color de la camiseta en el borde izquierdo o derecho,
+  // a la altura de pantalla que les toca en el campo. Cuanto más cerca del borde, más grande.
+  edgeDots(match) {
+    const c = this.ctx;
+    const dots = [];
+    for (const p of match.players) {
+      const [sx, sy, k] = this.P(p.x, Math.min(p.y, this.nearY), PLAYER.height / 2);
+      const half = 0.5 * k;                       // medio ancho del sprite, para que no salga el punto con medio jugador aún visible
+      const side = sx + half < 0 ? -1 : sx - half > this.w ? 1 : 0;
+      if (!side) continue;
+      // Metros que le faltan para entrar en pantalla, medidos a su profundidad.
+      const edgeX = this.camX + side * (this.w / 2) / k;
+      const off = Math.abs(p.x - edgeX);
+      dots.push({ p, side, sy, off });
+    }
+    dots.sort((a, z) => z.off - a.off);           // los cercanos (grandes) encima
+    const margin = 4;
+    for (const { p, side, sy, off } of dots) {
+      const n = Math.max(4, Math.round(12 - off / 5)); // diámetro en píxeles de dibujo: 12 justo al lado, 4 a 40 m o más
+      const size = n * PIXEL;
+      const x = side < 0 ? margin : this.w - margin - size;
+      const y = Math.round(Math.max(margin, Math.min(this.h - margin - size, sy - size / 2)));
+      const r = size / 2;
+      if (p.human) {                               // el que manejas: aro de su color de jugador
+        c.fillStyle = HUMAN_COLORS[p.human.id] || '#ffd23f';
+        c.beginPath(); c.arc(x + r, y + r, r + PIXEL, 0, Math.PI * 2); c.fill();
+      }
+      c.fillStyle = p.team.color.shirt;
+      c.beginPath(); c.arc(x + r, y + r, r, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = 'rgba(16,52,20,0.75)';      // contorno verde oscuro sutil, para que resalte del césped
+      c.lineWidth = 1.5;
+      c.stroke();
     }
   }
 

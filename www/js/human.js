@@ -79,16 +79,29 @@ export class Human {
     }
 
     this.charge = null;
-    if (match.state !== 'play') return;
+    if (match.state !== 'play') { this.pendingAerial = null; return; }
 
     const d = dist(p.x, p.y, ball.x, ball.y);
-    const aerial = !ball.owner && d < 1.3 && ball.z > 0.3 && ball.z < 2.8 && p.kickCD <= 0;
+    // Balón a su alcance ahora mismo (de pie o en el aire): volea o cabezazo.
+    const rel = ball.z - p.z;
+    const aerial = !ball.owner && d < 1.3 && rel > 0.3 && ball.z < p.headZ && p.kickCD <= 0;
+    // Balón que viene por encima de la cabeza: hay que saltar.
+    const high = !ball.owner && d < 4 && ball.z >= p.headZ - 0.1 && ball.z < p.headZ + 2.5;
+
+    // En el aire: cabecea en cuanto la pelota llega a la cabeza.
+    if (p.state === 'jump') {
+      if (this.pendingAerial && aerial) { this.strikeAerial(match, inp, this.pendingAerial); this.pendingAerial = null; }
+      return;
+    }
+    this.pendingAerial = null;
 
     if (aDown) {
       if (aerial) this.strikeAerial(match, inp, 1);
+      else if (high && p.jump(1)) this.pendingAerial = 1;
       else p.slide();
     } else if (bDown) {
       if (aerial) this.strikeAerial(match, inp, 0.7);
+      else if (high && p.jump(1)) this.pendingAerial = 0.7;
       else {
         const near = team.nearestTo(ball.x, ball.y, q => !q.isGK && q !== p);
         if (near) { this.setPlayer(near); this.switchT = 1.0; }
@@ -153,7 +166,7 @@ export class Human {
     if (Math.hypot(inp.x, inp.y) < 0.3 && team.progress(p.x) > 0.7) {
       dir = { x: team.oppGoalX - p.x, y: CY - p.y };
     }
-    p.kick(ball, dir.x, dir.y, power, ball.z > 1.3 ? 'header' : 'volley');
+    p.kick(ball, dir.x, dir.y, power, ball.z - p.z > 1.3 ? 'header' : 'volley');
     match.onKick(p, 'shot');
   }
 }
