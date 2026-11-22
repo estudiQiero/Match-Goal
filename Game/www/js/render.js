@@ -1,0 +1,606 @@
+import { PITCH, PLAYER } from './config.js';
+import { WEAR_CELL, WEAR_PAD, WEAR_W, WEAR_H } from './match.js';
+import { drawPixelText, pixelTextWidth } from './pixelfont.js';
+import { playerSprite, kitFor, pickDir, hasAnim, frameCount, SPRITE_H, ANIM_FPS } from './sprites.js';
+
+// Tamaño del píxel del sprite en pantalla (px CSS por píxel del dibujo). ×2 = «pixel gordo».
+const PIXEL = 2;
+// Por debajo de esta velocidad (m/s) el jugador anda; por encima, corre.
+const WALK_MAX = 3.4;
+const STRIDE = { andar: 1.5, correr: 2.4 };
+
+// Granitos del césped: posiciones fijas en el campo (y algo fuera), repartidas al azar con semilla.
+const GRAIN = (() => {
+  let seed = 12345;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 4294967296);
+  const out = [];
+  for (let i = 0; i < 26000; i++) {
+    const t = rnd();
+    out.push([-6 + rnd() * (PITCH.length + 12), -6 + rnd() * (PITCH.width + 12), t < 0.45 ? 0 : t < 0.85 ? 1 : 2, rnd()]);
+  }
+  return out;
+})();
+
+const L = PITCH.length, W = PITCH.width, CY = W / 2;
+const HUMAN_COLORS = { 1: '#ffd23f', 2: '#4fd1ff' };
+// Blanco de las líneas, algo apagado para que no destaque más que los jugadores.
+// Desgaste de las líneas: ruido suave pegado al campo. En unos pocos tramos la cal está gastada:
+// la línea se apaga y pierde píxeles sueltos.
+const hash2 = (x, y) => { let h = (x * 374761393 + y * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+function valueNoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+// Fuerza de la cal en un punto según lo pisado (wear 0..1 del partido).
+// El ruido hace que el desgaste sea irregular y que se coma píxeles sueltos.
+function lineStrength(wx, wy, wear) {
+  const n = valueNoise(wx / 1.3, wy / 1.3);
+  const worn = Math.min(1, Math.max(0, wear * (0.5 + 0.9 * n) - 0.08));
+  if (worn <= 0) return 0.95;
+  const grain = hash2(Math.floor(wx * 9), Math.floor(wy * 9));   // píxeles comidos dentro del tramo
+  return Math.max(0.1, 0.95 - worn * (0.3 + 0.6 * grain));
+}
+
+const BALL_GREYS = ['#ffffff', '#ebebe8', '#cfd0cf', '#a9abab'];
+// Parches grises del balón: centros repartidos por la esfera (vértices de un tetraedro).
+const BALL_PATCH_GREYS = ['#b9bbba', '#a5a7a6', '#8f9291', '#7a7d7c'];
+const BALL_PATCHES = [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]].map(v => v.map(c => c / Math.sqrt(3)));
+const LINE_RGB = [214, 226, 206];
+const MIN_DEPTH = 3;
+
+// Cámara en perspectiva: elevada, desde la banda cercana, mirando hacia la banda lejana.
+// Las líneas convergen, los jugadores lejanos se ven más pequeños
+// y las porterías se ven de lado, con la red.
+export class Renderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.tilt = 0.6;        // inclinación hacia abajo (rad)
+    this.dist = 55;         // distancia de la cámara al punto que mira (m)
+    this.camX = L / 2;
+    this.camY = CY;
+    this.resize();
+    window.addEventListener('resize', () => this.resize());
+  }
+
+  resize() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.w = window.innerWidth; this.h = window.innerHeight;
+    this.canvas.width = Math.round(this.w * dpr);
+    this.canvas.height = Math.round(this.h * dpr);
+    this.canvas.style.width = this.w + 'px';
+    this.canvas.style.height = this.h + 'px';
+    this.dpr = dpr;
+    // Píxeles por metro en el punto que mira la cámara: los que hacen que el jugador
+    // (SPRITE_H píxeles de dibujo = PLAYER.height metros) se vea a PIXEL px por píxel.
+    // En un Mac de 1440 px caben unos 24 m de campo.
+    this.s0 = PIXEL * SPRITE_H / PLAYER.height;
+    this.focal = this.s0 * this.dist;
+    this.cy = this.h * 0.56;
+    this.setupCam();
+  }
+
+  setupCam() {
+    this.ct = Math.cos(this.tilt); this.st = Math.sin(this.tilt);
+    this.cyW = this.camY + this.dist * this.ct;   // posición de la cámara (y)
+    this.czW = this.dist * this.st;               // altura de la cámara
+  }
+
+  depth(y, z = 0) { return (this.cyW - y) * this.ct + (this.czW - z) * this.st; }
+
+  // Proyección de un punto del mundo a la pantalla: [x, y, escala].
+  P(x, y, z = 0) {
+    const dy = this.cyW - y, dz = this.czW - z;
+    const d = Math.max(0.5, dy * this.ct + dz * this.st);
+    const up = dy * this.st - dz * this.ct;
+    const k = this.focal / d;
+    return [this.w / 2 + (x - this.camX) * k, this.cy - up * k, k];
+  }
+
+  // Mayor y de suelo que queda delante de la cámara.
+  get nearY() { return Math.min(W + 6, this.cyW + (this.czW * this.st - MIN_DEPTH) / this.ct); }
+
+  updateCamera(match, dt) {
+    const b = match.ball;
+    const lead = b.owner ? b.owner.vx * 0.5 : b.vx * 0.3;
+    const k = Math.min(1, dt * 3.5);
+    this.camX += (b.x + lead - this.camX) * k;
+    this.camY += (b.y - this.camY) * k * 0.8;
+    // Si algo llegara a dar un valor inválido, la cámara vuelve al centro en vez de quedarse sin imagen.
+    if (!Number.isFinite(this.camX)) this.camX = Number.isFinite(b.x) ? b.x : L / 2;
+    if (!Number.isFinite(this.camY)) this.camY = Number.isFinite(b.y) ? b.y : CY;
+    this.camX = Math.max(4, Math.min(L - 4, this.camX));
+    this.camY = Math.max(14, Math.min(W - 10, this.camY));
+    this.setupCam();
+  }
+
+  draw(match, humans) {
+    const c = this.ctx;
+    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.setupCam();
+    const near = this.nearY;
+    const ref = match.referee;
+    const b = match.ball;
+    // Sombras: se pintan en la capa de píxeles del campo (ver pixelShadows).
+    const shadows = [];
+    for (const p of [...match.players, ref]) if (p.y < near) shadows.push([p.x, p.y, 0.42, 0.30]);
+    // La del balón se hace más pequeña y tenue cuanto más alto va (a 4–5 m, menos de la mitad).
+    if (b.y < near) shadows.push([b.x, b.y, 0.22 * Math.max(0.45, 1 - b.z * 0.12), Math.max(0.1, 0.30 - b.z * 0.04)]);
+    this.wearMap = match.wear;
+    this.drawPitch(shadows);
+
+    // Objetos ordenados por profundidad (más lejos primero).
+    const items = [];
+    for (const g of [0, L]) {
+      items.push({ y: CY - PITCH.goalWidth / 2 - 0.05, draw: () => this.goalBack(g) });
+      items.push({ y: CY + PITCH.goalWidth / 2 + 0.05, draw: () => this.goalFront(g) });
+    }
+    for (const p of [...match.players, ref]) if (p.y < near) items.push({ y: p.y, draw: () => this.player(p) });
+    if (b.y < near) items.push({ y: b.y + 0.01, draw: () => this.ball(b) });
+    items.sort((a, z) => a.y - z.y);
+    for (const it of items) it.draw();
+
+    for (const h of humans) if (h.player && h.player.y < near) this.humanMarker(h);
+    this.hud(match, humans);
+  }
+
+  // ---------- Campo ----------
+
+  poly(pts, fill) {
+    const c = this.ctx;
+    c.beginPath();
+    pts.forEach(([x, y, z], i) => {
+      const [sx, sy] = this.P(x, y, z || 0);
+      if (i) c.lineTo(sx, sy); else c.moveTo(sx, sy);
+    });
+    c.closePath();
+    if (fill) { c.fillStyle = fill; c.fill(); }
+  }
+
+  // Línea en el suelo, recortada si pasa por detrás de la cámara.
+  // No se traza aquí: se guarda y luego se pinta píxel a píxel (ver pixelLines).
+  line(pts) {
+    const near = this.nearY;
+    for (let i = 0; i < pts.length - 1; i++) {
+      let [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+      if (y0 > near && y1 > near) continue;
+      if (y0 > near) { const t = (near - y1) / (y0 - y1); x0 = x1 + (x0 - x1) * t; y0 = near; }
+      if (y1 > near) { const t = (near - y0) / (y1 - y0); x1 = x0 + (x1 - x0) * t; y1 = near; }
+      const a = this.P(x0, y0), b = this.P(x1, y1);
+      // También se guardan los extremos en el campo: el desgaste va pegado al suelo, no a la pantalla.
+      this.segs.push(a[0], a[1], b[0], b[1], (a[2] + b[2]) / 2, x0, y0, x1, y1);
+    }
+  }
+
+  // Desgaste del partido en un punto del campo (interpolado entre celdas).
+  wearAt(x, y) {
+    const m = this.wearMap;
+    if (!m) return 0;
+    const fx = (x + WEAR_PAD) / WEAR_CELL - 0.5, fy = (y + WEAR_PAD) / WEAR_CELL - 0.5;
+    const x0 = Math.max(0, Math.min(WEAR_W - 2, Math.floor(fx))), y0 = Math.max(0, Math.min(WEAR_H - 2, Math.floor(fy)));
+    const tx = Math.min(1, Math.max(0, fx - x0)), ty = Math.min(1, Math.max(0, fy - y0)), i = y0 * WEAR_W + x0;
+    const a = m[i] + (m[i + 1] - m[i]) * tx, b = m[i + WEAR_W] + (m[i + WEAR_W + 1] - m[i + WEAR_W]) * tx;
+    return a + (b - a) * ty;
+  }
+
+  // Pinta las líneas guardadas en la imagen de baja resolución, píxel a píxel (píxeles gordos),
+  // con algunos tramos desgastados y un borde suave que las funde con el césped.
+  pixelLines(img) {
+    const d = img.data, w = img.width, h = img.height, [r, g, b] = LINE_RGB;
+    const ink = new Float32Array(w * h);           // cuánta línea hay en cada píxel (0..1)
+    const plot = (x, y, t, s) => {
+      for (let yy = y; yy < y + t; yy++) for (let xx = x; xx < x + t; xx++) {
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const j = yy * w + xx;
+        if (s > ink[j]) ink[j] = s;
+      }
+    };
+    const S = this.segs;
+    for (let n = 0; n < S.length; n += 9) {
+      // Grosor real de la línea (12 cm) en píxeles gordos: 1 o 2.
+      const t = Math.max(1, Math.min(2, Math.round(0.12 * S[n + 4] / PIXEL)));
+      let x0 = Math.round(S[n] / PIXEL - t / 2), y0 = Math.round(S[n + 1] / PIXEL - t / 2);
+      const x1 = Math.round(S[n + 2] / PIXEL - t / 2), y1 = Math.round(S[n + 3] / PIXEL - t / 2);
+      if (Math.max(x0, x1) < -t || Math.min(x0, x1) > w || Math.max(y0, y1) < -t || Math.min(y0, y1) > h) continue;
+      const [wx0, wy0, wx1, wy1] = [S[n + 5], S[n + 6], S[n + 7], S[n + 8]];
+      const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+      const steps = Math.max(1, Math.max(dx, -dy));
+      let err = dx + dy;
+      for (let k = 0; k < 4000; k++) {
+        const f = Math.min(1, k / steps), wx = wx0 + (wx1 - wx0) * f, wy = wy0 + (wy1 - wy0) * f;
+        plot(x0, y0, t, lineStrength(wx, wy, this.wearAt(wx, wy)));
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+    }
+    for (const [x, y, k] of this.dots) {
+      const t = Math.max(2, Math.min(3, Math.round(0.3 * k / PIXEL)));
+      plot(Math.round(x / PIXEL - t / 2), Math.round(y / PIXEL - t / 2), t, 0.95);
+    }
+    // Suavizado al estilo pixel art: solo en las esquinas de los escalones (el píxel de césped
+    // que tiene línea a un lado Y arriba o abajo). Los tramos rectos quedan nítidos.
+    const halo = new Float32Array(w * h);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const j = y * w + x;
+      if (ink[j] > 0) continue;
+      const hor = Math.max(ink[j - 1], ink[j + 1]), ver = Math.max(ink[j - w], ink[j + w]);
+      if (hor && ver) halo[j] = 0.42 * Math.min(hor, ver);
+    }
+    for (let j = 0; j < w * h; j++) {
+      const a = Math.max(ink[j], halo[j]);
+      if (a <= 0) continue;
+      const i = j * 4;
+      d[i] += (r - d[i]) * a; d[i + 1] += (g - d[i + 1]) * a; d[i + 2] += (b - d[i + 2]) * a;
+    }
+  }
+
+  // Granitos del césped: puntos fijos en el campo (no en la pantalla), así no bailan con la cámara.
+  grassGrain(img) {
+    const d = img.data, w = img.width, h = img.height;
+    const near = this.nearY, hit = new Uint8Array(w * h);
+    for (const [gx, gy, kind, u] of GRAIN) {
+      if (gy > near) continue;
+      const [sx, sy, k] = this.P(gx, gy);
+      // A lo lejos cada píxel cubre más césped: se descartan granitos para que la densidad
+      // en pantalla sea la misma, y nunca caen dos en el mismo píxel.
+      if (u > (k / this.s0) ** 2) continue;
+      const x = Math.floor(sx / PIXEL), y = Math.floor(sy / PIXEL);
+      if (x < 0 || y < 0 || x >= w || y >= h || hit[y * w + x]) continue;
+      hit[y * w + x] = 1;
+      const i = (y * w + x) * 4, f = kind === 0 ? 0.84 : kind === 1 ? 0.9 : 1.07;
+      d[i] *= f; d[i + 1] *= f; d[i + 2] *= f;
+      // Algunos son briznas de dos píxeles.
+      if (kind === 0 && y > 0) { const k = i - w * 4; d[k] *= 0.92; d[k + 1] *= 0.92; d[k + 2] *= 0.92; }
+    }
+  }
+
+  // Sombra en píxeles: elipse con tres escalones de intensidad, más oscura bajo los pies.
+  pixelShadows(img, shadows) {
+    const d = img.data, w = img.width, h = img.height;
+    for (const [x, y, r, alpha] of shadows) {
+      const [sx, sy, k] = this.P(x, y);
+      const rx = r * k / PIXEL;
+      const ry = Math.max(0.8, Math.abs(this.P(x, y + r)[1] - this.P(x, y - r)[1]) / 2 / PIXEL);
+      const cx = sx / PIXEL, cy = sy / PIXEL;
+      for (let py = Math.floor(cy - ry); py <= Math.ceil(cy + ry); py++) {
+        if (py < 0 || py >= h) continue;
+        for (let px = Math.floor(cx - rx); px <= Math.ceil(cx + rx); px++) {
+          if (px < 0 || px >= w) continue;
+          const e = ((px + 0.5 - cx) / rx) ** 2 + ((py + 0.5 - cy) / ry) ** 2;
+          if (e > 1) continue;
+          const a = alpha * (e < 0.3 ? 1 : e < 0.65 ? 0.62 : 0.3), i = (py * w + px) * 4, f = 1 - a;
+          d[i] *= f; d[i + 1] *= f; d[i + 2] *= f;
+        }
+      }
+    }
+  }
+
+  arc(cx, cy, r, a0, a1) {
+    const pts = [];
+    const n = 40;
+    for (let i = 0; i <= n; i++) {
+      const a = a0 + (a1 - a0) * i / n;
+      pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+    }
+    this.line(pts);
+  }
+
+  drawPitch(shadows = []) {
+    // El césped y las líneas se pintan a la resolución del pixel art (1 píxel gordo = PIXEL px)
+    // y luego se amplían sin suavizar, para que tengan el mismo estilo que los jugadores.
+    const lw = Math.ceil(this.w / PIXEL), lh = Math.ceil(this.h / PIXEL);
+    if (!this.low || this.low.width !== lw || this.low.height !== lh) {
+      this.low = document.createElement('canvas');
+      this.low.width = lw; this.low.height = lh;
+      this.lowCtx = this.low.getContext('2d', { willReadFrequently: true });
+    }
+    const main = this.ctx, c = this.lowCtx;
+    c.setTransform(1 / PIXEL, 0, 0, 1 / PIXEL, 0, 0);
+    this.ctx = c;
+    const near = this.nearY;
+    c.fillStyle = '#2f7a35';
+    c.fillRect(0, 0, this.w, this.h);
+
+    // Franjas de césped.
+    for (let i = -2; i < Math.ceil(L / 5.25) + 2; i++) {
+      const x0 = i * 5.25, x1 = x0 + 5.25;
+      this.poly([[x0, -4], [x1, -4], [x1, near], [x0, near]], i % 2 === 0 ? '#3a8f3f' : '#358539');
+    }
+
+    // Líneas: se recogen y se pintan píxel a píxel.
+    this.segs = []; this.dots = [];
+    this.line([[0, 0], [L, 0], [L, W], [0, W], [0, 0]]);
+    this.line([[L / 2, 0], [L / 2, W]]);
+    for (const [gx, d] of [[0, 1], [L, -1]]) {
+      const bw = PITCH.boxWidth / 2, sw = PITCH.smallBoxWidth / 2;
+      this.line([[gx, CY - bw], [gx + d * PITCH.boxDepth, CY - bw], [gx + d * PITCH.boxDepth, CY + bw], [gx, CY + bw]]);
+      this.line([[gx, CY - sw], [gx + d * PITCH.smallBoxDepth, CY - sw], [gx + d * PITCH.smallBoxDepth, CY + sw], [gx, CY + sw]]);
+      const px = gx + d * PITCH.penaltySpot;
+      this.dot(px, CY);
+      const th = Math.acos((PITCH.boxDepth - PITCH.penaltySpot) / PITCH.centerRadius);
+      if (d > 0) this.arc(px, CY, PITCH.centerRadius, -th, th);
+      else this.arc(px, CY, PITCH.centerRadius, Math.PI - th, Math.PI + th);
+    }
+    this.arc(L / 2, CY, PITCH.centerRadius, 0, Math.PI * 2);
+    this.dot(L / 2, CY);
+    for (const [x, y, a0] of [[0, 0, 0], [L, 0, Math.PI / 2], [L, W, Math.PI], [0, W, -Math.PI / 2]]) {
+      this.arc(x, y, 1, a0, a0 + Math.PI / 2);
+    }
+    const img = c.getImageData(0, 0, lw, lh);
+    this.grassGrain(img);
+    this.pixelLines(img);
+    this.pixelShadows(img, shadows);
+    c.putImageData(img, 0, 0);
+
+    this.ctx = main;
+    main.imageSmoothingEnabled = false;
+    main.drawImage(this.low, 0, 0, lw * PIXEL, lh * PIXEL);
+    main.imageSmoothingEnabled = true;
+  }
+
+  dot(x, y) {
+    if (y > this.nearY) return;
+    this.dots.push(this.P(x, y));
+  }
+
+  groundEllipse(x, y, r, fill) {
+    const c = this.ctx;
+    const [sx, sy, k] = this.P(x, y);
+    const ry = Math.abs(this.P(x, y + r)[1] - this.P(x, y - r)[1]) / 2;
+    c.fillStyle = fill;
+    c.beginPath();
+    c.ellipse(sx, sy, r * k, Math.max(0.5, ry), 0, 0, Math.PI * 2);
+    c.fill();
+  }
+
+  shadow(x, y, r, alpha) { this.groundEllipse(x, y, r, `rgba(0,0,0,${alpha})`); }
+
+  // ---------- Porterías ----------
+
+  goalPts(gx) {
+    const o = gx === 0 ? -1 : 1;
+    return {
+      y1: CY - PITCH.goalWidth / 2, y2: CY + PITCH.goalWidth / 2,
+      H: PITCH.goalHeight, bx: gx + o * PITCH.goalDepth,
+      P: (x, y, z) => this.P(x, y, z).slice(0, 2),
+    };
+  }
+
+  goalVisible(gx) {
+    const [sx] = this.P(gx, CY);
+    return sx > -this.w * 0.5 && sx < this.w * 1.5;
+  }
+
+  netQuad(a, b, d, e) {
+    const c = this.ctx;
+    c.beginPath(); c.moveTo(...a); c.lineTo(...b); c.lineTo(...d); c.lineTo(...e); c.closePath();
+    c.fill(); c.stroke();
+  }
+
+  goalBack(gx) {
+    if (!this.goalVisible(gx)) return;
+    const c = this.ctx;
+    const { y1, y2, H, P, bx } = this.goalPts(gx);
+    const hb = H * 0.8;
+    c.fillStyle = 'rgba(255,255,255,0.13)';
+    c.strokeStyle = 'rgba(255,255,255,0.4)';
+    c.lineWidth = 1;
+    // Fondo, techo y lateral lejano de la red.
+    this.netQuad(P(bx, y1, 0), P(bx, y2, 0), P(bx, y2, hb), P(bx, y1, hb));
+    this.netQuad(P(gx, y1, H), P(gx, y2, H), P(bx, y2, hb), P(bx, y1, hb));
+    this.netQuad(P(gx, y1, 0), P(bx, y1, 0), P(bx, y1, hb), P(gx, y1, H));
+    // Malla.
+    c.beginPath();
+    for (let i = 1; i < 10; i++) {
+      const y = y1 + (y2 - y1) * i / 10;
+      c.moveTo(...P(bx, y, 0)); c.lineTo(...P(bx, y, hb)); c.lineTo(...P(gx, y, H));
+    }
+    for (let i = 1; i < 5; i++) {
+      const z = hb * i / 5;
+      c.moveTo(...P(gx, y1, z * H / hb)); c.lineTo(...P(bx, y1, z)); c.lineTo(...P(bx, y2, z));
+    }
+    for (let i = 1; i < 4; i++) {
+      const x = gx + (bx - gx) * i / 4;
+      const z = H + (hb - H) * i / 4;
+      c.moveTo(...P(x, y1, 0)); c.lineTo(...P(x, y1, z)); c.lineTo(...P(x, y2, z));
+    }
+    c.stroke();
+    this.post(gx, y1);
+  }
+
+  goalFront(gx) {
+    if (!this.goalVisible(gx)) return;
+    const c = this.ctx;
+    const { y1, y2, H, P, bx } = this.goalPts(gx);
+    const hb = H * 0.8;
+    c.fillStyle = 'rgba(255,255,255,0.1)';
+    c.strokeStyle = 'rgba(255,255,255,0.4)';
+    c.lineWidth = 1;
+    this.netQuad(P(gx, y2, 0), P(bx, y2, 0), P(bx, y2, hb), P(gx, y2, H));
+    c.beginPath();
+    for (let i = 1; i < 4; i++) {
+      const x = gx + (bx - gx) * i / 4;
+      c.moveTo(...P(x, y2, 0)); c.lineTo(...P(x, y2, H + (hb - H) * i / 4));
+    }
+    c.stroke();
+    this.post(gx, y2);
+    // Larguero.
+    const k = this.P(gx, CY)[2];
+    c.strokeStyle = '#f4f4f4';
+    c.lineWidth = Math.max(2, k * 0.12);
+    c.lineCap = 'round';
+    c.beginPath(); c.moveTo(...P(gx, y1, H)); c.lineTo(...P(gx, y2, H)); c.stroke();
+  }
+
+  post(gx, y) {
+    const c = this.ctx;
+    const a = this.P(gx, y, 0), b = this.P(gx, y, PITCH.goalHeight);
+    c.strokeStyle = '#f4f4f4';
+    c.lineWidth = Math.max(2, a[2] * 0.12);
+    c.lineCap = 'round';
+    c.beginPath(); c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
+  }
+
+  // ---------- Jugadores ----------
+
+  player(p) {
+    const c = this.ctx;
+    const [x, y, u] = this.P(p.x, p.y);
+    const m = SPRITE_H * PIXEL;
+    if (x < -m || x > this.w + m || y < -m || y > this.h + m * 2) return;
+
+    // Animación según la velocidad: quieto, andar (si existe el dibujo) o correr.
+    // Los pasos avanzan con la distancia recorrida, así los pies no patinan:
+    // STRIDE = metros que avanza el jugador en un ciclo completo de la animación (dos pasos).
+    const speed = Math.hypot(p.vx, p.vy);
+    const moving = p.state === 'normal' && speed > 0.6;
+    let anim = 'quieto', bob = 0;
+    if (moving && hasAnim('andar') && speed < WALK_MAX) anim = 'andar';
+    else if (moving && hasAnim('correr')) anim = 'correr';
+    else if (moving) bob = Math.floor(p.anim / 0.95) % 2;
+    // Entrada, caída y estirada: aún sin dibujo propio, se gira el de lado.
+    const tilted = p.state === 'slide' || p.state === 'fallen' || p.state === 'dive';
+    const face = p.fx >= 0 ? 1 : -1;
+    const { dir, mirror } = tilted ? pickDir(anim, face, 0) : pickDir(anim, p.fx, p.fy);
+    const frame = anim === 'quieto'
+      ? Math.floor(performance.now() / 1000 * (ANIM_FPS.quieto || 2) + (p.index || 0) * 0.37)
+      : Math.floor(p.anim / 1.6 / STRIDE[anim] * frameCount(anim, dir));
+    const spr = playerSprite(p.kit || kitFor(p.team, p.isGK), anim, dir, frame, p.number);
+
+    c.save();
+    // Pies en el punto del suelo, ajustados a píxel entero para que el pixel art no se emborrone.
+    c.translate(Math.round(x), Math.round(y) - bob * PIXEL);
+    if (p.state === 'slide') c.rotate(-face * 1.2);
+    else if (p.state === 'fallen') c.rotate(face * 1.45);
+    else if (p.state === 'dive') { c.translate(0, -0.5 * u); c.rotate((p.vy > 0 ? 1 : -1) * face * 1.3); }
+    if (mirror) c.scale(-1, 1);
+    c.imageSmoothingEnabled = false;
+    // Todos los jugadores con el mismo tamaño de píxel, estén cerca o lejos.
+    c.drawImage(spr.canvas, -spr.ax * PIXEL, -spr.ay * PIXEL, spr.canvas.width * PIXEL, spr.canvas.height * PIXEL);
+    c.restore();
+  }
+
+  // Balón en píxeles: blanco, sin contorno, con volumen en grises (luz de arriba a la izquierda).
+  ball(b) {
+    const c = this.ctx;
+    const [x, y, k] = this.P(b.x, b.y, b.z);
+    const r = Math.max(2.2, k * 0.16 / PIXEL);            // radio en píxeles gordos (más grande que el real, estilo arcade)
+    const cx = Math.round(x / PIXEL), cy = Math.round(y / PIXEL - r);
+    const n = Math.ceil(r);
+    // Dirección en la que rueda, vista en pantalla (se recuerda la última si se para).
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp > 0.3) { const dx = b.vx, dy = b.vy * this.st, l = Math.hypot(dx, dy) || 1; this.ballDir = [dx / l, dy / l]; }
+    const [ux, uy] = this.ballDir || [1, 0];
+    const cr = Math.cos(b.rot), sr = Math.sin(b.rot);
+    for (let py = -n; py <= n; py++) for (let px = -n; px <= n; px++) {
+      const qx = px / r, qy = py / r;
+      const e = qx * qx + qy * qy;
+      if (e > 0.94) continue;                               // sin píxeles sueltos en los extremos
+      // Luz: más clara arriba a la izquierda, más oscura abajo a la derecha y en el borde.
+      const lit = -0.55 * qx - 0.75 * qy + 0.35 * (1 - e);
+      const shade = lit > 0.35 ? 0 : lit > -0.05 ? 1 : lit > -0.45 ? 2 : 3;
+      // Punto de la esfera bajo este píxel, girado hacia atrás lo que ha rodado el balón:
+      // si cae cerca de un parche, el píxel es gris.
+      const qz = Math.sqrt(Math.max(0, 1 - e));
+      const a = qx * ux + qy * uy, w = -qx * uy + qy * ux;   // a lo largo del movimiento / de lado
+      const a2 = a * cr - qz * sr, z2 = a * sr + qz * cr;
+      let patch = false;
+      for (const [pa, pw, pz] of BALL_PATCHES) if (a2 * pa + w * pw + z2 * pz > 0.86) { patch = true; break; }
+      c.fillStyle = (patch ? BALL_PATCH_GREYS : BALL_GREYS)[shade];
+      c.fillRect((cx + px) * PIXEL, (cy + py) * PIXEL, PIXEL, PIXEL);
+    }
+  }
+
+  humanMarker(h) {
+    const c = this.ctx, p = h.player;
+    const [x, y, u] = this.P(p.x, p.y);
+    const col = HUMAN_COLORS[h.id];
+    const ry = Math.abs(this.P(p.x, p.y + 0.6)[1] - this.P(p.x, p.y - 0.6)[1]) / 2;
+    c.strokeStyle = col;
+    c.lineWidth = 2;
+    c.beginPath();
+    c.ellipse(x, y, 0.6 * u, Math.max(1, ry), 0, 0, Math.PI * 2);
+    c.stroke();
+    const ty = y - 2.05 * u;
+    c.fillStyle = col;
+    c.beginPath();
+    c.moveTo(x, ty + 0.18 * u); c.lineTo(x - 0.16 * u, ty - 0.06 * u); c.lineTo(x + 0.16 * u, ty - 0.06 * u);
+    c.closePath(); c.fill();
+
+    // Medidor de golpeo.
+    const m = h.meter;
+    if (m !== null) {
+      const bw = Math.max(50, 1.8 * u), bh = Math.max(6, 0.2 * u);
+      const bx = x - bw / 2, by = ty - 0.25 * u - bh;
+      c.fillStyle = 'rgba(0,0,0,0.6)';
+      c.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+      const g = c.createLinearGradient(bx, 0, bx + bw, 0);
+      g.addColorStop(0, '#3ddc84'); g.addColorStop(0.6, '#ffd23f'); g.addColorStop(1, '#ff4d4d');
+      c.fillStyle = g;
+      c.fillRect(bx, by, bw * m, bh);
+      c.fillStyle = '#fff';
+      c.font = `700 ${Math.max(10, Math.round(u * 0.28))}px system-ui, sans-serif`;
+      c.textAlign = 'center'; c.textBaseline = 'bottom';
+      c.fillText(h.charge.type === 'loft' ? 'ALTO' : 'RASO', x, by - 3);
+    }
+  }
+
+  // ---------- Marcador ----------
+
+  hud(match, humans) {
+    const c = this.ctx;
+    const pad = 14;
+    const [h, a] = [match.home, match.away];
+    c.font = '700 16px system-ui, sans-serif';
+    c.textBaseline = 'middle';
+    const txt = `${h.name}  ${h.score} - ${a.score}  ${a.name}`;
+    const tw = c.measureText(txt).width + 110;
+    const x0 = this.w / 2 - tw / 2;
+    c.fillStyle = 'rgba(10,14,20,0.78)';
+    roundRect(c, x0, pad, tw, 34, 8);
+    c.fillStyle = h.color.shirt; c.fillRect(x0 + 10, pad + 9, 10, 16);
+    c.fillStyle = a.color.shirt; c.fillRect(x0 + tw - 64, pad + 9, 10, 16);
+    c.fillStyle = '#fff';
+    c.textAlign = 'left';
+    c.fillText(txt, x0 + 28, pad + 17);
+    c.fillStyle = '#ffd23f';
+    c.textAlign = 'right';
+    c.fillText(`${match.minute}'`, x0 + tw - 10, pad + 17);
+
+    c.font = '600 12px system-ui, sans-serif';
+    const tac = `${h.formation} · ${h.tactic.label}     ${a.formation} · ${a.tactic.label}`;
+    const tw2 = c.measureText(tac).width + 20;
+    c.fillStyle = 'rgba(10,14,20,0.6)';
+    roundRect(c, this.w / 2 - tw2 / 2, pad + 37, tw2, 18, 6);
+    c.fillStyle = 'rgba(255,255,255,0.9)';
+    c.textAlign = 'center';
+    c.fillText(tac, this.w / 2, pad + 46);
+
+    if (match.messageT > 0) {
+      // Mensajes en letras de píxeles gordos, sin contorno. Se encogen si no caben.
+      const goal = match.state === 'goal';
+      const fit = px => Math.min(px, Math.floor(this.w * 0.92 / pixelTextWidth(match.message)));
+      const px = fit(goal ? PIXEL * 6 : PIXEL * 3);
+      drawPixelText(c, match.message, this.w / 2, this.h * 0.3, px, goal ? '#ffd23f' : '#f4f4ec');
+      if (match.state === 'end') {
+        const t = 'Pulsa Esc o toca para volver al menú';
+        drawPixelText(c, t, this.w / 2, this.h * 0.3 + 9 * px, Math.min(PIXEL * 1.5, Math.floor(this.w * 0.92 / pixelTextWidth(t))), '#f4f4ec');
+      }
+    }
+  }
+}
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+  c.fill();
+}

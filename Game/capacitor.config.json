@@ -1,0 +1,7 @@
+{
+  "appId": "es.miq.matchgoal",
+  "appName": "Match Goal",
+  "webDir": "www",
+  "ios": { "contentInset": "never" },
+  "android": { "backgroundColor": "#0f1720" }
+}

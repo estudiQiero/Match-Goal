@@ -1,0 +1,171 @@
+:root {
+  --bg: #0f1720;
+  --panel: rgba(12, 18, 26, 0.92);
+  --line: rgba(255, 255, 255, 0.14);
+  --text: #f2f4f7;
+  --muted: #9aa6b5;
+  --accent: #ffd23f;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+
+canvas#game { display: block; position: fixed; inset: 0; }
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(5, 10, 15, 0.35);
+  overflow-y: auto;
+}
+.overlay[hidden] { display: none; }
+
+.panel {
+  width: min(760px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+h1 {
+  margin: 0;
+  font-size: 48px;
+  font-weight: 900;
+  letter-spacing: -1px;
+  color: var(--accent);
+}
+h2 { margin: 0 0 4px; }
+h3 { margin: 0 0 8px; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.sub { margin: 0 0 18px; color: var(--muted); }
+
+.row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; align-items: end; }
+
+label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); padding-bottom: 8px; }
+
+select, input {
+  font: inherit;
+  color: var(--text);
+  background: #1b2633;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 9px;
+  min-width: 120px;
+}
+
+.teams { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+fieldset, .team-tactic {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+legend { padding: 0 6px; font-weight: 700; color: var(--text); }
+.chip { width: 12px; height: 18px; border-radius: 3px; display: inline-block; }
+
+.help { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+.help p { margin: 4px 0; }
+.help b { color: var(--text); }
+
+button {
+  font: inherit;
+  font-weight: 700;
+  color: var(--text);
+  background: #253244;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 20px;
+  cursor: pointer;
+}
+button.primary { background: var(--accent); color: #1b1b1b; border-color: transparent; font-size: 18px; padding: 12px 36px; }
+button:hover { filter: brightness(1.1); }
+.buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+
+#pause-btn {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  display: none;
+  background: rgba(10, 14, 20, 0.7);
+}
+body.playing #pause-btn { display: block; }
+
+/* Controles táctiles */
+#touch { display: none; }
+#touch.touch { display: block; }
+body:not(.playing) #touch, body:not(.has-human) #touch { display: none; }
+
+.stick {
+  position: fixed;
+  left: max(24px, env(safe-area-inset-left));
+  bottom: 28px;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  touch-action: none;
+}
+.knob {
+  position: absolute;
+  left: 40px;
+  top: 40px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+}
+.btns {
+  position: fixed;
+  right: max(24px, env(safe-area-inset-right));
+  bottom: 28px;
+  display: flex;
+  gap: 18px;
+  align-items: flex-end;
+}
+.btn {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 14px;
+  background: rgba(255, 210, 63, 0.35);
+  border: 2px solid rgba(255, 210, 63, 0.7);
+  touch-action: none;
+}
+.btn-b { margin-bottom: 50px; background: rgba(79, 209, 255, 0.3); border-color: rgba(79, 209, 255, 0.7); }
+.btn.on { filter: brightness(1.6); }
+
+@media (max-width: 640px) {
+  .teams { grid-template-columns: 1fr; }
+  h1 { font-size: 36px; }
+  .panel { padding: 18px; }
+}

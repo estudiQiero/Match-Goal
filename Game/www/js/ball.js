@@ -1,0 +1,144 @@
+import { BALL, PITCH } from './config.js';
+
+const CY = PITCH.width / 2;
+const HALF_GOAL = PITCH.goalWidth / 2;
+
+export class Ball {
+  constructor() {
+    this.reset(PITCH.length / 2, CY);
+  }
+
+  reset(x, y) {
+    this.x = x; this.y = y; this.z = 0;
+    this.vx = 0; this.vy = 0; this.vz = 0;
+    this.spin = 0;          // aceleración lateral (efecto), m/s²
+    this.owner = null;      // jugador que la controla
+    this.lastTouch = null;  // último jugador que la tocó
+    this.inNet = null;      // 'left' | 'right' cuando ha entrado en una portería
+    this.rot = 0;           // rotación visual
+  }
+
+  get speed() { return Math.hypot(this.vx, this.vy); }
+
+  kick(vx, vy, vz, spin = 0) {
+    this.vx = vx; this.vy = vy; this.vz = vz; this.spin = spin;
+    this.kickId = (this.kickId || 0) + 1;
+    this.age = 0;
+    if (this.owner) this.owner.hasBall = false;
+    this.owner = null;
+  }
+
+  // Devuelve un evento si el balón sale del campo o entra en una portería.
+  update(dt) {
+    const px = this.x;
+    let event = null;
+    this.age = (this.age || 0) + dt;
+
+    if (!this.owner) {
+      // Efecto: aceleración perpendicular a la velocidad.
+      const s = this.speed;
+      if (s > 1 && this.spin) {
+        this.vx += (-this.vy / s) * this.spin * dt;
+        this.vy += (this.vx / s) * this.spin * dt;
+        this.spin *= Math.exp(-1.2 * dt);
+      }
+
+      if (this.z > 0 || this.vz > 0) {
+        this.vz -= BALL.gravity * dt;
+        const drag = 1 - BALL.airDrag * dt;
+        this.vx *= drag; this.vy *= drag;
+      } else if (s > 0) {
+        const ns = Math.max(0, s - BALL.groundDecel * dt) * (1 - 0.25 * dt);
+        this.vx *= ns / s; this.vy *= ns / s;
+      }
+
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      this.z += this.vz * dt;
+
+      if (this.z < 0) {
+        this.z = 0;
+        if (this.vz < -1.5) {
+          this.vz = -this.vz * BALL.bounce;
+          this.vx *= BALL.bounceFriction; this.vy *= BALL.bounceFriction;
+          this.spin *= 0.5;
+        } else {
+          this.vz = 0;
+        }
+      }
+
+      this.collideGoal(0, -1);
+      this.collideGoal(PITCH.length, 1);
+    }
+
+    this.rot += this.speed * dt * 3;
+
+    if (this.inNet) {
+      this.containNet();
+      return null;
+    }
+
+    // ¿Ha cruzado la línea de fondo?
+    const r = BALL.radius;
+    // El balón entero tiene que pasar la línea (x < -r o x > largo + r).
+    // Se mira si la ha pasado en este paso, aunque en el anterior ya estuviera encima de la línea.
+    if (px >= -r && this.x < -r) event = this.lineEvent('left');
+    else if (px <= PITCH.length + r && this.x > PITCH.length + r) event = this.lineEvent('right');
+    else if (this.y < -r || this.y > PITCH.width + r) event = { type: 'throw' };
+    return event;
+  }
+
+  lineEvent(side) {
+    if (Math.abs(this.y - CY) < HALF_GOAL && this.z < PITCH.goalHeight) {
+      this.inNet = side;
+      return { type: 'goal', side };
+    }
+    return { type: 'byline', side };
+  }
+
+  // Postes y larguero.
+  collideGoal(gx, dir) {
+    if (this.z < PITCH.goalHeight + BALL.radius) {
+      for (const py of [CY - HALF_GOAL, CY + HALF_GOAL]) {
+        if (this.z < PITCH.goalHeight) this.bounceOff(this.x - gx, this.y - py, 'xy');
+      }
+    }
+    if (Math.abs(this.y - CY) < HALF_GOAL) {
+      this.bounceOff(this.x - gx, this.z - PITCH.goalHeight, 'xz');
+    }
+  }
+
+  bounceOff(dx, dd, plane) {
+    const minD = BALL.radius + BALL.postRadius;
+    const d = Math.hypot(dx, dd);
+    if (d >= minD || d === 0) return;
+    const nx = dx / d, nd = dd / d;
+    const v2 = plane === 'xy' ? this.vy : this.vz;
+    const vn = this.vx * nx + v2 * nd;
+    // Empuja fuera del poste.
+    this.x += nx * (minD - d);
+    if (plane === 'xy') this.y += nd * (minD - d); else this.z += nd * (minD - d);
+    if (vn < 0) {
+      this.vx -= (1 + BALL.postBounce) * vn * nx;
+      if (plane === 'xy') this.vy -= (1 + BALL.postBounce) * vn * nd;
+      else this.vz -= (1 + BALL.postBounce) * vn * nd;
+      this.spin = 0;
+      this.onPost = true;
+    }
+  }
+
+  containNet() {
+    const back = this.inNet === 'left' ? -PITCH.goalDepth : PITCH.length + PITCH.goalDepth;
+    const r = BALL.radius;
+    if (this.inNet === 'left' ? this.x < back + r : this.x > back - r) {
+      this.x = this.inNet === 'left' ? back + r : back - r;
+      this.vx *= -0.15; this.vy *= 0.5; this.vz *= 0.5;
+    }
+    const lim = HALF_GOAL - r;
+    if (Math.abs(this.y - CY) > lim) {
+      this.y = CY + Math.sign(this.y - CY) * lim;
+      this.vy *= -0.15;
+    }
+    if (this.z > PITCH.goalHeight - r) { this.z = PITCH.goalHeight - r; this.vz *= -0.2; }
+  }
+}

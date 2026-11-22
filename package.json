@@ -1,0 +1,10 @@
+{
+  "name": "match-goal-repo",
+  "private": true,
+  "description": "Match Goal: atajos para ejecutar el juego que está en Game/",
+  "scripts": {
+    "dev": "npm --prefix Game run dev",
+    "test": "cd Game && node tests/goal-line.mjs && node tests/sim.mjs",
+    "sprites": "node Graficos/jugador-3d/importar.cjs"
+  }
+}

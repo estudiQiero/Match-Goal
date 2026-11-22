@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0f1720">
+  <title>Match Goal</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Menú principal -->
+  <div id="menu" class="overlay">
+    <div class="panel">
+      <h1>Match Goal</h1>
+      <p class="sub">Fútbol arcade · vista lateral</p>
+
+      <div class="row">
+        <label>Modo
+          <select id="mode">
+            <option value="1p">1 jugador contra la CPU</option>
+            <option value="2p">2 jugadores</option>
+            <option value="cpu">CPU contra CPU</option>
+          </select>
+        </label>
+        <label>Duración de cada parte
+          <select id="half">
+            <option value="2">2 min</option>
+            <option value="3">3 min</option>
+            <option value="5">5 min</option>
+            <option value="8">8 min</option>
+          </select>
+        </label>
+        <label>Dificultad CPU
+          <select id="difficulty">
+            <option value="facil">Fácil</option>
+            <option value="normal">Normal</option>
+            <option value="dificil">Difícil</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="sound"> Sonido</label>
+      </div>
+
+      <div class="teams">
+        <fieldset data-team="home">
+          <legend>Local</legend>
+          <label>Nombre <input name="name" maxlength="14"></label>
+          <label>Color <select name="color"></select></label>
+          <label>Formación <select name="formation"></select></label>
+          <label>Mentalidad <select name="mentality"></select></label>
+          <label>Pases <select name="passing"></select></label>
+        </fieldset>
+        <fieldset data-team="away">
+          <legend>Visitante</legend>
+          <label>Nombre <input name="name" maxlength="14"></label>
+          <label>Color <select name="color"></select></label>
+          <label>Formación <select name="formation"></select></label>
+          <label>Mentalidad <select name="mentality"></select></label>
+          <label>Pases <select name="passing"></select></label>
+        </fieldset>
+      </div>
+
+      <div id="help" class="help"></div>
+      <button id="play" class="primary">Jugar</button>
+    </div>
+  </div>
+
+  <!-- Pausa -->
+  <div id="pause" class="overlay" hidden>
+    <div class="panel">
+      <h2>Pausa · Tácticas</h2>
+      <p id="pause-stats" class="sub"></p>
+      <div id="pause-teams" class="teams"></div>
+      <div class="buttons">
+        <button id="resume" class="primary">Continuar</button>
+        <button id="quit">Salir al menú</button>
+      </div>
+    </div>
+  </div>
+
+  <button id="pause-btn" aria-label="Pausa">II</button>
+
+  <!-- Controles táctiles -->
+  <div id="touch">
+    <div class="stick"><div class="knob"></div></div>
+    <div class="btns">
+      <div class="btn btn-b">ALTO</div>
+      <div class="btn btn-a">RASO</div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
