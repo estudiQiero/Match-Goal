@@ -542,43 +542,40 @@ export class Renderer {
     }
   }
 
+  // Aro en el suelo y flecha encima del jugador que manejas, en píxeles gordos.
   humanMarker(h) {
     const c = this.ctx, p = h.player;
     const [x, y, u] = this.P(p.x, p.y);
     const col = HUMAN_COLORS[h.id];
-    const ry = Math.abs(this.P(p.x, p.y + 0.6)[1] - this.P(p.x, p.y - 0.6)[1]) / 2;
-    c.strokeStyle = col;
-    c.lineWidth = 2;
-    c.beginPath();
-    c.ellipse(x, y, 0.6 * u, Math.max(1, ry), 0, 0, Math.PI * 2);
-    c.stroke();
+    const ry = Math.max(PIXEL * 1.5, Math.abs(this.P(p.x, p.y + 0.6)[1] - this.P(p.x, p.y - 0.6)[1]) / 2);
+    pixelEllipseRing(c, x, y, 0.6 * u, ry, col);
     const ty = y - 2.05 * u;
+    const hw = Math.max(2, Math.round(0.16 * u / PIXEL));        // medio ancho de la flecha, en píxeles gordos
+    const tx = snap(x), top = snap(ty - 0.06 * u);
     c.fillStyle = col;
-    c.beginPath();
-    c.moveTo(x, ty + 0.18 * u); c.lineTo(x - 0.16 * u, ty - 0.06 * u); c.lineTo(x + 0.16 * u, ty - 0.06 * u);
-    c.closePath(); c.fill();
+    for (let r = 0; r <= hw; r++) c.fillRect(tx - (hw - r) * PIXEL, top + r * PIXEL, (2 * (hw - r) + 1) * PIXEL, PIXEL);
 
-    // Medidor de golpeo.
+    // Medidor de golpeo: casillas de colores por tramos (verde, amarillo, rojo), sin degradado.
     const m = h.meter;
     if (m !== null) {
-      const bw = Math.max(50, 1.8 * u), bh = Math.max(6, 0.2 * u);
-      const bx = x - bw / 2, by = ty - 0.25 * u - bh;
+      const cols = Math.max(25, Math.round(1.8 * u / PIXEL)), rows = Math.max(3, Math.round(0.2 * u / PIXEL));
+      const bw = cols * PIXEL, bh = rows * PIXEL;
+      const bx = snap(x - bw / 2), by = snap(ty - 0.25 * u - bh);
       c.fillStyle = 'rgba(0,0,0,0.6)';
-      c.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
-      const g = c.createLinearGradient(bx, 0, bx + bw, 0);
-      g.addColorStop(0, '#3ddc84'); g.addColorStop(0.6, '#ffd23f'); g.addColorStop(1, '#ff4d4d');
-      c.fillStyle = g;
-      c.fillRect(bx, by, bw * m, bh);
-      c.fillStyle = '#fff';
-      c.font = `700 ${Math.max(10, Math.round(u * 0.28))}px system-ui, sans-serif`;
-      c.textAlign = 'center'; c.textBaseline = 'bottom';
-      c.fillText(h.charge.type === 'loft' ? 'ALTO' : 'RASO', x, by - 3);
+      c.fillRect(bx - PIXEL, by - PIXEL, bw + 2 * PIXEL, bh + 2 * PIXEL);
+      const full = Math.round(cols * m);
+      for (let i = 0; i < full; i++) {
+        const t = i / cols;
+        c.fillStyle = t < 0.35 ? '#3ddc84' : t < 0.6 ? '#b6e04a' : t < 0.8 ? '#ffd23f' : '#ff4d4d';
+        c.fillRect(bx + i * PIXEL, by, PIXEL, bh);
+      }
+      drawPixelText(c, h.charge.type === 'loft' ? 'ALTO' : 'RASO', bx + bw / 2, by - 2 * PIXEL - 3.5 * PIXEL, PIXEL, '#fff');
     }
   }
 
   // ---------- Indicadores en los bordes ----------
 
-  // Jugadores fuera de cámara: un punto redondo con un contorno verde oscuro sutil, del color de la camiseta en el borde izquierdo o derecho,
+  // Jugadores fuera de cámara: un punto redondo de píxeles gordos, con un contorno verde oscuro, del color de la camiseta en el borde izquierdo o derecho,
   // a la altura de pantalla que les toca en el campo. Cuanto más cerca del borde, más grande.
   edgeDots(match) {
     const c = this.ctx;
@@ -594,55 +591,46 @@ export class Renderer {
       dots.push({ p, side, sy, off });
     }
     dots.sort((a, z) => z.off - a.off);           // los cercanos (grandes) encima
-    const margin = 4;
+    const margin = 3 * PIXEL;
     for (const { p, side, sy, off } of dots) {
       const n = Math.max(4, Math.round(12 - off / 5)); // diámetro en píxeles de dibujo: 12 justo al lado, 4 a 40 m o más
       const size = n * PIXEL;
-      const x = side < 0 ? margin : this.w - margin - size;
-      const y = Math.round(Math.max(margin, Math.min(this.h - margin - size, sy - size / 2)));
-      const r = size / 2;
-      if (p.human) {                               // el que manejas: aro de su color de jugador
-        c.fillStyle = HUMAN_COLORS[p.human.id] || '#ffd23f';
-        c.beginPath(); c.arc(x + r, y + r, r + PIXEL, 0, Math.PI * 2); c.fill();
-      }
-      c.fillStyle = p.team.color.shirt;
-      c.beginPath(); c.arc(x + r, y + r, r, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = 'rgba(16,52,20,0.75)';      // contorno verde oscuro sutil, para que resalte del césped
-      c.lineWidth = 1.5;
-      c.stroke();
+      const x = snap(side < 0 ? margin : this.w - margin - size);
+      const y = snap(Math.max(margin, Math.min(this.h - margin - size, sy - size / 2)));
+      // Discos de píxeles gordos: aro del jugador humano (si lo es), contorno verde oscuro y el punto.
+      if (p.human) pixelDisc(c, x - 2 * PIXEL, y - 2 * PIXEL, n + 4, HUMAN_COLORS[p.human.id] || '#ffd23f');
+      pixelDisc(c, x - PIXEL, y - PIXEL, n + 2, 'rgb(22,62,26)');
+      pixelDisc(c, x, y, n, p.team.color.shirt);
     }
   }
 
   // ---------- Marcador ----------
 
+  // Marcador y tácticas con letras de píxeles gordos sobre paneles de esquinas recortadas.
   hud(match, humans) {
     const c = this.ctx;
-    const pad = 14;
+    const pad = 7 * PIXEL;
     const [h, a] = [match.home, match.away];
-    c.font = '700 16px system-ui, sans-serif';
-    c.textBaseline = 'middle';
+    const big = 3;                                              // tamaño de píxel de las letras del marcador
     const txt = `${h.name}  ${h.score} - ${a.score}  ${a.name}`;
-    const tw = c.measureText(txt).width + 110;
-    const x0 = this.w / 2 - tw / 2;
-    c.fillStyle = 'rgba(10,14,20,0.78)';
-    roundRect(c, x0, pad, tw, 34, 8);
-    c.fillStyle = h.color.shirt; c.fillRect(x0 + 10, pad + 9, 10, 16);
-    c.fillStyle = a.color.shirt; c.fillRect(x0 + tw - 64, pad + 9, 10, 16);
-    c.fillStyle = '#fff';
-    c.textAlign = 'left';
-    c.fillText(txt, x0 + 28, pad + 17);
-    c.fillStyle = '#ffd23f';
-    c.textAlign = 'right';
-    c.fillText(`${match.minute}'`, x0 + tw - 10, pad + 17);
+    const min = `${match.minute}'`;
+    const tW = pixelTextWidth(txt) * big, mW = pixelTextWidth(min) * big;
+    const sw = 5 * PIXEL, gap = 6 * PIXEL;                      // muestras de color de cada equipo
+    const tw = snap(gap + sw + gap + tW + gap + sw + gap + mW + gap);
+    const th = 17 * PIXEL;
+    const x0 = snap(this.w / 2 - tw / 2), y0 = pad, mid = y0 + th / 2;
+    pixelPanel(c, x0, y0, tw, th, 'rgba(10,14,20,0.78)');
+    c.fillStyle = h.color.shirt; c.fillRect(x0 + gap, snap(mid - 4 * PIXEL), sw, 8 * PIXEL);
+    drawPixelText(c, txt, x0 + 2 * gap + sw + tW / 2, mid, big, '#fff', false);
+    const ax = x0 + 3 * gap + sw + tW;
+    c.fillStyle = a.color.shirt; c.fillRect(ax, snap(mid - 4 * PIXEL), sw, 8 * PIXEL);
+    drawPixelText(c, min, ax + sw + gap + mW / 2, mid, big, '#ffd23f', false);
 
-    c.font = '600 12px system-ui, sans-serif';
     const tac = `${h.formation} · ${h.tactic.label}     ${a.formation} · ${a.tactic.label}`;
-    const tw2 = c.measureText(tac).width + 20;
-    c.fillStyle = 'rgba(10,14,20,0.6)';
-    roundRect(c, this.w / 2 - tw2 / 2, pad + 37, tw2, 18, 6);
-    c.fillStyle = 'rgba(255,255,255,0.9)';
-    c.textAlign = 'center';
-    c.fillText(tac, this.w / 2, pad + 46);
+    const tw2 = snap(pixelTextWidth(tac) * PIXEL + 10 * PIXEL), th2 = 11 * PIXEL;
+    const y2 = y0 + th + 2 * PIXEL;
+    pixelPanel(c, snap(this.w / 2 - tw2 / 2), y2, tw2, th2, 'rgba(10,14,20,0.6)');
+    drawPixelText(c, tac, this.w / 2, y2 + th2 / 2, PIXEL, 'rgba(255,255,255,0.9)', false);
 
     if (match.messageT > 0) {
       // Mensajes en letras de píxeles gordos, sin contorno. Se encogen si no caben.
@@ -658,13 +646,36 @@ export class Renderer {
   }
 }
 
-function roundRect(c, x, y, w, h, r) {
-  c.beginPath();
-  c.moveTo(x + r, y);
-  c.arcTo(x + w, y, x + w, y + h, r);
-  c.arcTo(x + w, y + h, x, y + h, r);
-  c.arcTo(x, y + h, x, y, r);
-  c.arcTo(x, y, x + w, y, r);
-  c.closePath();
-  c.fill();
+// Ajusta una coordenada de pantalla a la rejilla de píxeles gordos.
+const snap = v => Math.round(v / PIXEL) * PIXEL;
+
+// Panel con las esquinas recortadas un píxel gordo (el «redondeado» del pixel art).
+function pixelPanel(c, x, y, w, h, color) {
+  c.fillStyle = color;
+  c.fillRect(x + PIXEL, y, w - 2 * PIXEL, PIXEL);
+  c.fillRect(x, y + PIXEL, w, h - 2 * PIXEL);
+  c.fillRect(x + PIXEL, y + h - PIXEL, w - 2 * PIXEL, PIXEL);
+}
+
+// Círculo relleno de n × n píxeles gordos, con la esquina superior izquierda en (x, y).
+function pixelDisc(c, x, y, n, color) {
+  const r = n / 2;
+  c.fillStyle = color;
+  for (let j = 0; j < n; j++) {
+    const dy = j + 0.5 - r;
+    const half = Math.sqrt(Math.max(0, r * r - dy * dy));
+    const i0 = Math.round(r - half), i1 = Math.round(r + half);
+    if (i1 > i0) c.fillRect(x + i0 * PIXEL, y + j * PIXEL, (i1 - i0) * PIXEL, PIXEL);
+  }
+}
+
+// Elipse hueca de un píxel gordo de grosor, centrada en (cx, cy) con radios rx, ry en px de pantalla.
+function pixelEllipseRing(c, cx, cy, rx, ry, color) {
+  const RX = rx / PIXEL, RY = ry / PIXEL, ox = cx / PIXEL, oy = cy / PIXEL;
+  const inside = (i, j, a, b) => ((i + 0.5 - ox) / a) ** 2 + ((j + 0.5 - oy) / b) ** 2 <= 1;
+  c.fillStyle = color;
+  for (let j = Math.floor(oy - RY - 1); j <= Math.ceil(oy + RY + 1); j++)
+    for (let i = Math.floor(ox - RX - 1); i <= Math.ceil(ox + RX + 1); i++)
+      if (inside(i, j, RX + 0.5, RY + 0.5) && !inside(i, j, Math.max(0.1, RX - 0.5), Math.max(0.1, RY - 0.5)))
+        c.fillRect(i * PIXEL, j * PIXEL, PIXEL, PIXEL);
 }

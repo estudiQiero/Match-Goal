@@ -44,6 +44,8 @@ const G = {
   "'": ['#', '#', '.', '.', '.', '.', '.'],
   '-': ['....', '....', '....', '####', '....', '....', '....'],
   ':': ['.', '#', '.', '.', '.', '#', '.'],
+  '·': ['.', '.', '.', '#', '.', '.', '.'],
+  '/': ['....#', '....#', '...#.', '..#..', '.#...', '#....', '#....'],
   '?': ['.###.', '#...#', '....#', '...#.', '..#..', '.....', '..#..'],
   '¿': ['..#..', '.....', '..#..', '.#...', '#....', '#...#', '.###.'],
 };
@@ -68,7 +70,7 @@ export function pixelTextWidth(text) {
 }
 
 // Dibuja el texto centrado en (cx, cy) con píxeles de tamaño px (en px de pantalla).
-export function drawPixelText(c, text, cx, cy, px, color) {
+export function drawPixelText(c, text, cx, cy, px, color, shadow = true) {
   const s = text.toUpperCase();
   px = Math.max(1, Math.round(px));
   const w = pixelTextWidth(s) * px;
@@ -86,8 +88,10 @@ export function drawPixelText(c, text, cx, cy, px, color) {
     x += (g[0].length + GAP) * px;
   }
   // Sombra tenue de un píxel hacia abajo (no es contorno).
-  c.fillStyle = 'rgba(0,0,0,0.22)';
-  for (const [a, b] of cells) c.fillRect(a, b + px, px, px);
+  if (shadow) {
+    c.fillStyle = 'rgba(0,0,0,0.22)';
+    for (const [a, b] of cells) c.fillRect(a, b + px, px, px);
+  }
   c.fillStyle = color;
   for (const [a, b] of cells) c.fillRect(a, b, px, px);
 }

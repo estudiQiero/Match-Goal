@@ -39,7 +39,7 @@ Si apuntas a un compañero, el pase sale dirigido a él; si apuntas a portería,
 - `www/js/tactics.js`: formaciones, mentalidades y estilos de pase.
 - `www/js/match.js`: reglas, contactos, saques, goles y tiempo.
 - `www/js/human.js`: control humano, medidor de golpeo y ayuda al pase.
-- `www/js/render.js`: dibujado del campo, jugadores, marcador y minimapa.
+- `www/js/render.js`: dibujado del campo, jugadores, marcador e indicadores de los jugadores fuera de pantalla.
 - `www/js/input.js`: teclado, mandos y controles táctiles.
 
 El motor (balón, jugadores, equipo, partido) no dibuja nada: si algún día se quiere portar a otro lenguaje, solo hay que rehacer `render.js` e `input.js`.
