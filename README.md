@@ -5,7 +5,7 @@ Se juega en el navegador y se empaqueta para iPad/iPhone y Android con Capacitor
 
 ## Inspiración
 
-Match Goal es un homenaje a **Match Day** (1984) y **Match Day II** (1987), los juegos de fútbol que **Jon Ritman** creó para **Ocean Software** en los años 80, para ZX Spectrum, Amstrad CPC y otros ordenadores de 8 bits. Los gráficos de Match Day II son de **Bernie Drummond**.
+Match Goal es un homenaje a **Match Day** (1984) y **Match Day II** (1987), los juegos de fútbol que **Jon Ritman** creó para **Ocean Software** en los años 80, para ZX Spectrum, Amstrad CPC y otros ordenadores de 8 bits. Los gráficos de Match Day son de **Chris Clarke**, y los de Match Day II, de **Bernie Drummond**.
 
 De aquellos juegos viene la idea: la vista lateral con scroll, en la que se ven las porterías y cómo entra el balón, y el medidor de potencia para golpear. A partir de ahí, Match Goal añade cosas propias: tácticas de equipo, una IA que defiende por líneas, árbitro, desgaste del césped y gráficos nuevos en pixel art.
 
