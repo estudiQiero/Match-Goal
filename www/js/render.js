@@ -573,32 +573,34 @@ export class Renderer {
 
   // ---------- Indicadores en los bordes ----------
 
-  // Jugadores fuera de cámara: un punto redondo de píxeles gordos, con un contorno verde oscuro, del color de la camiseta en el borde izquierdo o derecho,
-  // a la altura de pantalla que les toca en el campo. Cuanto más cerca del borde, más grande.
+  // Jugadores fuera de cámara: un triángulo de píxeles gordos del color de la camiseta, en el borde
+  // izquierdo o derecho (un poco separado), a la altura de pantalla que les toca en el campo.
+  // El triángulo apunta hacia donde mira el jugador, y es más grande cuanto más cerca está
+  // del jugador que manejas (sin jugador humano, del balón).
   edgeDots(match) {
     const c = this.ctx;
+    const ref = match.humans?.[0]?.player || match.ball;
     const dots = [];
     for (const p of match.players) {
       const [sx, sy, k] = this.P(p.x, Math.min(p.y, this.nearY), PLAYER.height / 2);
-      const half = 0.5 * k;                       // medio ancho del sprite, para que no salga el punto con medio jugador aún visible
+      const half = 0.5 * k;                       // medio ancho del sprite, para que no salga con medio jugador aún visible
       const side = sx + half < 0 ? -1 : sx - half > this.w ? 1 : 0;
       if (!side) continue;
-      // Metros que le faltan para entrar en pantalla, medidos a su profundidad.
-      const edgeX = this.camX + side * (this.w / 2) / k;
-      const off = Math.abs(p.x - edgeX);
-      dots.push({ p, side, sy, off });
+      const near = Math.hypot(p.x - ref.x, p.y - ref.y);
+      dots.push({ p, side, sy, near });
     }
-    dots.sort((a, z) => z.off - a.off);           // los cercanos (grandes) encima
-    const margin = 3 * PIXEL;
-    for (const { p, side, sy, off } of dots) {
-      const n = Math.max(4, Math.round(12 - off / 5)); // diámetro en píxeles de dibujo: 12 justo al lado, 4 a 40 m o más
+    dots.sort((a, z) => z.near - a.near);         // los cercanos (grandes) encima
+    const margin = 8 * PIXEL;
+    for (const { p, side, sy, near } of dots) {
+      const n = Math.max(5, Math.round(14 - near / 4)); // tamaño en píxeles de dibujo: 14 pegado a ti, 5 a 36 m o más
       const size = n * PIXEL;
       const x = snap(side < 0 ? margin : this.w - margin - size);
       const y = snap(Math.max(margin, Math.min(this.h - margin - size, sy - size / 2)));
-      // Discos de píxeles gordos: aro del jugador humano (si lo es), contorno verde oscuro y el punto.
-      if (p.human) pixelDisc(c, x - 2 * PIXEL, y - 2 * PIXEL, n + 4, HUMAN_COLORS[p.human.id] || '#ffd23f');
-      pixelDisc(c, x - PIXEL, y - PIXEL, n + 2, 'rgb(22,62,26)');
-      pixelDisc(c, x, y, n, p.team.color.shirt);
+      // Dirección en pantalla hacia la que mira (la profundidad se ve acortada por la inclinación).
+      const dx = p.fx, dy = p.fy * this.st;
+      if (p.human) pixelTriangle(c, x, y, n, dx, dy, HUMAN_COLORS[p.human.id] || '#ffd23f', 2);
+      pixelTriangle(c, x, y, n, dx, dy, 'rgb(22,62,26)', 1);
+      pixelTriangle(c, x, y, n, dx, dy, p.team.color.shirt, 0);
     }
   }
 
@@ -655,18 +657,6 @@ function pixelPanel(c, x, y, w, h, color) {
   c.fillRect(x + PIXEL, y + h - PIXEL, w - 2 * PIXEL, PIXEL);
 }
 
-// Círculo relleno de n × n píxeles gordos, con la esquina superior izquierda en (x, y).
-function pixelDisc(c, x, y, n, color) {
-  const r = n / 2;
-  c.fillStyle = color;
-  for (let j = 0; j < n; j++) {
-    const dy = j + 0.5 - r;
-    const half = Math.sqrt(Math.max(0, r * r - dy * dy));
-    const i0 = Math.round(r - half), i1 = Math.round(r + half);
-    if (i1 > i0) c.fillRect(x + i0 * PIXEL, y + j * PIXEL, (i1 - i0) * PIXEL, PIXEL);
-  }
-}
-
 // Elipse hueca de un píxel gordo de grosor, centrada en (cx, cy) con radios rx, ry en px de pantalla.
 function pixelEllipseRing(c, cx, cy, rx, ry, color) {
   const RX = rx / PIXEL, RY = ry / PIXEL, ox = cx / PIXEL, oy = cy / PIXEL;
@@ -676,4 +666,26 @@ function pixelEllipseRing(c, cx, cy, rx, ry, color) {
     for (let i = Math.floor(ox - RX - 1); i <= Math.ceil(ox + RX + 1); i++)
       if (inside(i, j, RX + 0.5, RY + 0.5) && !inside(i, j, Math.max(0.1, RX - 0.5), Math.max(0.1, RY - 0.5)))
         c.fillRect(i * PIXEL, j * PIXEL, PIXEL, PIXEL);
+}
+
+// Triángulo de píxeles gordos dentro de un cuadrado de n píxeles de dibujo con esquina en (x, y),
+// con la punta hacia (dx, dy). grow > 0 lo engorda esos píxeles (para contornos).
+function pixelTriangle(c, x, y, n, dx, dy, color, grow) {
+  const l = Math.hypot(dx, dy) || 1;
+  const ux = dx / l, uy = dy / l, vx = -uy, vy = ux;
+  const r = n / 2, cx = n / 2, cy = n / 2;
+  // Vértices: punta y dos de la base (base algo más estrecha que el alto).
+  const A = [cx + ux * r, cy + uy * r];
+  const B = [cx - ux * r * 0.7 + vx * r * 0.85, cy - uy * r * 0.7 + vy * r * 0.85];
+  const C = [cx - ux * r * 0.7 - vx * r * 0.85, cy - uy * r * 0.7 - vy * r * 0.85];
+  const edge = (P, Q, px, py) => ((Q[0] - P[0]) * (py - P[1]) - (Q[1] - P[1]) * (px - P[0])) /
+    Math.hypot(Q[0] - P[0], Q[1] - P[1]);
+  const sgn = Math.sign(edge(A, B, C[0], C[1])) || 1;
+  c.fillStyle = color;
+  for (let j = -grow; j < n + grow; j++) for (let i = -grow; i < n + grow; i++) {
+    const px = i + 0.5, py = j + 0.5;
+    if (sgn * edge(A, B, px, py) >= -grow && sgn * edge(B, C, px, py) >= -grow && sgn * edge(C, A, px, py) >= -grow) {
+      c.fillRect(x + i * PIXEL, y + j * PIXEL, PIXEL, PIXEL);
+    }
+  }
 }

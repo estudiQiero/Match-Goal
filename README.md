@@ -25,7 +25,7 @@ Abre http://localhost:8090.
 |---|---|---|---|---|
 | Mover | Q arriba · A abajo · O izquierda · P derecha (o flechas) | Q A O P | Flechas | Stick / cruceta |
 | Raso / entrada | Espacio | Espacio | `.` | A (asignable) |
-| Alto / cambiar jugador | Z o M | Z o M | `-` | B (asignable) |
+| Alto / cambiar jugador | Intro | Intro | `-` | B (asignable) |
 | Pausa y tácticas | Esc | Esc | | Start (asignable) |
 
 Estas son las teclas por defecto. En el menú se pueden cambiar con **Redefinir teclas** (Jugador 1 y Jugador 2), y los botones del mando con **Asignar botones del mando**, que sirve para cualquier mando o joystick. En el modo de 1 jugador valen las teclas de los dos jugadores.

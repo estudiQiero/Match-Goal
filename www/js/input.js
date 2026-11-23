@@ -20,7 +20,7 @@ export const KEY_ACTIONS = [
   ['a', 'RASO (pase o chut raso, entrada)'], ['b', 'ALTO (pase o chut alto, cambiar de jugador)'],
 ];
 const KEYS_DEFAULT = {
-  p1: { up: ['KeyQ'], down: ['KeyA'], left: ['KeyO'], right: ['KeyP'], a: ['Space'], b: ['KeyZ', 'KeyM'] },
+  p1: { up: ['KeyQ'], down: ['KeyA'], left: ['KeyO'], right: ['KeyP'], a: ['Space'], b: ['Enter'] },
   p2: { up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'], a: ['Period'], b: ['Slash'] },
 };
 // Nombre que se ve de cada tecla. Las que se asignan en el menú guardan el carácter real
@@ -74,7 +74,7 @@ function scheme(name) {
   return out;
 }
 
-// Texto de ayuda: «Q arriba · A abajo · … · Espacio raso · Z o M alto».
+// Texto de ayuda: «Q arriba · A abajo · … · Espacio raso · Intro alto».
 export function schemeLabel(name) {
   const m = scheme(name), names = c => c.length ? c.map(keyLabel).join(' o ') : '(sin tecla)';
   return `${names(m.up)} arriba · ${names(m.down)} abajo · ${names(m.left)} izquierda · ${names(m.right)} derecha · ${names(m.a)} raso · ${names(m.b)} alto`;

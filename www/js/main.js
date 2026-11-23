@@ -234,6 +234,8 @@ function startMatch() {
 
   $('#menu').hidden = true;
   $('#pause').hidden = true;
+  // Intro es una tecla de juego: si el botón «Jugar» siguiera con el foco, la pulsación lo activaría.
+  document.activeElement?.blur();
   document.body.classList.toggle('playing', true);
   document.body.classList.toggle('has-human', mode !== 'cpu');
   paused = false;
@@ -272,7 +274,7 @@ function openPause() {
   $('#pause').hidden = false;
 }
 
-function closePause() { $('#pause').hidden = true; paused = false; last = performance.now(); }
+function closePause() { $('#pause').hidden = true; paused = false; last = performance.now(); document.activeElement?.blur(); }
 
 function toMenu() {
   match = null;
