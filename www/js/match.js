@@ -212,7 +212,9 @@ export class Match {
     const p = ball.owner;
     ball.attached = false;
     if (!p) return;
-    if (p.state !== 'normal' && p.state !== 'dive' && p.state !== 'jump') { ball.owner = null; p.hasBall = false; return; }
+    // El portero no suelta el balón al levantarse de una estirada.
+    const holding = p.state === 'dive' || p.state === 'jump' || (p.isGK && p.state === 'getup');
+    if (p.state !== 'normal' && !holding) { ball.owner = null; p.hasBall = false; return; }
     if (p.isGK || p.mustPass) {
       const off = p.isGK ? 0.35 : 0.55;
       const tx = p.x + p.fx * off, ty = p.y + p.fy * off;
@@ -343,7 +345,7 @@ export class Match {
       const reach = gkHands ? (p.state === 'dive' ? 1.8 : 1.1) : PLAYER.controlDist;
       // El portero llega con las manos más arriba si salta.
       const maxZ = gkHands ? 2.7 + p.z : 0.6;
-      if (p.state === 'fallen' || (p.state === 'slide')) continue;
+      if (p.state === 'fallen' || p.state === 'slide' || p.state === 'getup') continue;
       const rel = ball.z - p.z;            // altura del balón respecto a los pies
       const airborne = p.state === 'jump';
       // En el aire, un jugador de campo no puede controlar un balón con el pie.

@@ -38,6 +38,9 @@ export const PLAYER = {
   slideTime: 0.55,
   slideSpeed: 10,
   fallTime: 1.0,
+  // Levantarse del suelo (segundos, al azar entre los dos valores): tirarse a por el balón
+  // o caer tiene un precio, aunque recuperes la pelota pierdes tiempo.
+  getUp: { slide: [0.8, 1.3], fallen: [0.5, 0.9], dive: [0.5, 0.8] },
   jumpSpeed: 4.0,
   // Conducción a toques: el balón nunca va pegado al pie.
   touchReach: 0.6,       // distancia a la que puede tocar el balón al correr

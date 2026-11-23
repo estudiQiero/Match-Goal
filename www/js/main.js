@@ -310,6 +310,8 @@ function pollPadStart() {
 // ---------- Bucle ----------
 
 function frame(t) {
+  // Se pide el siguiente fotograma lo primero: si algo falla en este, el juego no se queda congelado.
+  requestAnimationFrame(frame);
   // Nunca negativo: el primer fotograma puede llevar una marca de tiempo anterior a 'last'.
   const dt = Math.max(0, Math.min(0.05, (t - last) / 1000));
   last = t;
@@ -326,7 +328,6 @@ function frame(t) {
   } else {
     drawAttract(dt);
   }
-  requestAnimationFrame(frame);
 }
 
 // Fondo del menú: un partido CPU contra CPU.

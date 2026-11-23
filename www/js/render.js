@@ -137,6 +137,8 @@ export class Renderer {
   }
 
   draw(match, humans) {
+    // Ventana sin tamaño (minimizada, panel oculto…): no hay nada que dibujar.
+    if (this.w < 1 || this.h < 1) return;
     const c = this.ctx;
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.setupCam();
@@ -490,7 +492,7 @@ export class Renderer {
     else if (moving && hasAnim('correr')) anim = 'correr';
     else if (moving) bob = Math.floor(p.anim / 0.95) % 2;
     // Entrada, caída y estirada: aún sin dibujo propio, se gira el de lado.
-    const tilted = p.state === 'slide' || p.state === 'fallen' || p.state === 'dive';
+    const tilted = p.state === 'slide' || p.state === 'fallen' || p.state === 'dive' || p.state === 'getup';
     const face = p.fx >= 0 ? 1 : -1;
     const { dir, mirror } = tilted ? pickDir(anim, face, 0) : pickDir(anim, p.fx, p.fy);
     const frame = anim === 'quieto'
@@ -506,6 +508,12 @@ export class Renderer {
     if (p.state === 'slide') c.rotate(-face * 1.2);
     else if (p.state === 'fallen') c.rotate(face * 1.45);
     else if (p.state === 'dive') { c.translate(0, -0.5 * u); c.rotate((p.vy > 0 ? 1 : -1) * face * 1.3); }
+    else if (p.state === 'getup') {
+      // Levantándose (aún sin dibujo propio): sigue tumbado un rato y luego se va incorporando.
+      const base = p.getUpFrom === 'slide' ? -face * 1.2 : face * (p.getUpFrom === 'dive' ? 1.3 : 1.45);
+      const t = 1 - Math.max(0, p.stateT) / (p.getUpTime || 1);
+      c.rotate(base * (t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45));
+    }
     if (mirror) c.scale(-1, 1);
     c.imageSmoothingEnabled = false;
     // Todos los jugadores con el mismo tamaño de píxel, estén cerca o lejos.

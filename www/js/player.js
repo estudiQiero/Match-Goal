@@ -55,7 +55,16 @@ export class Player {
     this.kickAnim = Math.max(0, this.kickAnim - dt);
     if (this.stateT > 0) {
       this.stateT -= dt;
-      if (this.stateT <= 0) this.state = 'normal';
+      if (this.stateT <= 0) {
+        // Tras una entrada, una caída o una estirada no se vuelve a jugar al momento: hay que levantarse.
+        const r = PLAYER.getUp[this.state];
+        if (r) {
+          this.getUpFrom = this.state;
+          this.getUpTime = r[0] + Math.random() * (r[1] - r[0]);
+          this.state = 'getup';
+          this.stateT = this.getUpTime;
+        } else this.state = 'normal';
+      }
     }
 
     if (this.state === 'jump') {
@@ -68,7 +77,7 @@ export class Player {
     } else if (this.state === 'slide' || this.state === 'dive') {
       const k = Math.exp(-3 * dt);
       this.vx *= k; this.vy *= k;
-    } else if (this.state === 'fallen') {
+    } else if (this.state === 'fallen' || this.state === 'getup') {
       this.vx *= Math.exp(-8 * dt); this.vy *= Math.exp(-8 * dt);
     } else {
       let max = this.maxSpeed * this.skill;
