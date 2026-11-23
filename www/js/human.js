@@ -1,4 +1,4 @@
-import { KICK, PITCH } from './config.js';
+import { KICK, PITCH, PLAYER } from './config.js';
 import { predictBall } from './team.js';
 
 const CY = PITCH.width / 2;
@@ -12,15 +12,29 @@ export class Human {
     this.id = id;               // 1 o 2, para el indicador de color
     this.player = null;
     this.prev = { a: false, b: false };
-    this.charge = null;         // { type, t }
+    this.press = null;          // botón de golpeo: { type, phase: 'press'|'manual'|'wait', t, auto }
+    this.queued = null;         // golpeo decidido esperando a tener el balón al alcance: { type, power, t }
+    this.autoT = Math.random(); // reloj del medidor automático
     this.switchT = 0;
   }
 
+  // Medidor automático: de flojo a fuerte en autoUp s y de vuelta en autoDown s, sin parar.
+  get autoMeter() {
+    const up = KICK.autoUp, down = KICK.autoDown, t = this.autoT % (up + down);
+    return t < up ? t / up : 1 - (t - up) / down;
+  }
+
+  // Medidor manual (manteniendo el botón): sube en manualUp s y, si te pasas, baja igual de lento.
+  manualMeter(t) {
+    const u = t / KICK.manualUp;
+    return u <= 1 ? u : 2 - u;
+  }
+
+  // Lo que muestra el medidor encima del jugador: { value 0..1, manual }.
   get meter() {
-    if (!this.charge) return null;
-    // El medidor sube y baja mientras mantienes el botón.
-    const c = (this.charge.t / KICK.chargeTime) % 2;
-    return c <= 1 ? c : 2 - c;
+    const k = this.press;
+    if (k && k.phase === 'manual') return { value: Math.max(0, this.manualMeter(k.t)), manual: true, type: k.type };
+    return { value: this.autoMeter, manual: false, type: k?.type || null };
   }
 
   setPlayer(p) {
@@ -28,7 +42,8 @@ export class Human {
     if (this.player) { this.player.human = null; this.player.mx = this.player.my = 0; }
     this.player = p;
     if (p) p.human = this;
-    this.charge = null;
+    this.press = null;
+    this.queued = null;
   }
 
   update(match, dt) {
@@ -66,19 +81,16 @@ export class Human {
     const canAct = match.state === 'play' ||
       (match.restartTaker === p && (match.state === 'kickoff' ? match.whistled : match.restartWait < 0.6));
 
+    this.autoT += dt;
+
     if (p.hasBall) {
-      if (!canAct) return;
-      if (aDown) this.charge = { type: 'ground', t: 0 };
-      if (bDown) this.charge = { type: 'loft', t: 0 };
-      if (this.charge) {
-        this.charge.t += dt;
-        const released = this.charge.type === 'ground' ? aUp : bUp;
-        if (released) this.release(match, inp);
-      }
+      if (!canAct) { this.press = null; this.queued = null; return; }
+      this.kickInput(match, inp, dt, { aDown, bDown, aUp, bUp });
       return;
     }
 
-    this.charge = null;
+    this.press = null;
+    this.queued = null;
     if (match.state !== 'play') { this.pendingAerial = null; return; }
 
     const d = dist(p.x, p.y, ball.x, ball.y);
@@ -109,6 +121,56 @@ export class Human {
     }
   }
 
+  // Botones de golpeo con el balón:
+  //  pulsación seca  → golpeo con la fuerza que marcaba el medidor automático al pulsar
+  //  doble pulsación → pase corto flojo
+  //  mantener        → el medidor lo cargas tú; si te pasas, baja y al llegar a cero solo das un toque corto
+  kickInput(match, inp, dt, e) {
+    const k = this.press;
+    const down = { ground: e.aDown, loft: e.bDown }, up = { ground: e.aUp, loft: e.bUp };
+
+    if (!k) {
+      const type = e.aDown ? 'ground' : e.bDown ? 'loft' : null;
+      if (type) this.press = { type, phase: 'press', t: 0, auto: this.autoMeter };
+    } else if (k.phase === 'press') {
+      k.t += dt;
+      if (up[k.type]) { k.phase = 'wait'; k.wait = 0; }
+      else if (k.t >= KICK.holdTime) k.phase = 'manual';
+    } else if (k.phase === 'manual') {
+      k.t += dt;
+      const v = this.manualMeter(k.t);
+      if (v <= 0) {
+        // Te has pasado y el medidor ha vuelto a cero: no hay golpeo, solo un toque cortito.
+        this.queue('ground', KICK.touchPower);
+        this.press = null;
+      } else if (up[k.type]) {
+        this.queue(k.type, v);
+        this.press = null;
+      }
+    } else if (k.phase === 'wait') {
+      k.wait += dt;
+      if (down[k.type]) {
+        this.queue(k.type, KICK.tapPower);              // doble pulsación
+        this.press = null;
+      } else if (k.wait >= KICK.doubleTap) {
+        this.queue(k.type, k.auto);                     // pulsación seca
+        this.press = null;
+      }
+    }
+
+    // Golpea en cuanto tiene el balón a su alcance (va a toques: a veces está un poco lejos).
+    const q = this.queued;
+    if (q) {
+      const p = this.player, ball = match.ball;
+      if (Math.hypot(ball.x - p.x, ball.y - p.y) < PLAYER.kickReach && ball.z < 1) {
+        this.queued = null;
+        this.release(match, inp, q.type, q.power);
+      } else if ((q.t += dt) > KICK.queueTime) this.queued = null;
+    }
+  }
+
+  queue(type, power) { this.queued = { type, power: Math.max(0, Math.min(1, power)), t: 0 }; }
+
   aimDir(inp) {
     const p = this.player;
     const l = Math.hypot(inp.x, inp.y);
@@ -116,13 +178,10 @@ export class Human {
     return { x: p.fx, y: p.fy };
   }
 
-  release(match, inp) {
+  release(match, inp, type, power) {
     const ball = match.ball;
     const p = this.player;
-    const power = Math.max(0.05, this.meter);
-    const type = this.charge.type;
-    this.charge = null;
-    const dir = this.aimDir(inp);
+    let dir = this.aimDir(inp);
     const team = this.team;
 
     // ¿Apunta a portería? Entonces es un chut, sin ayuda.
@@ -130,10 +189,11 @@ export class Human {
     const toGoalX = gx - p.x, toGoalY = CY - p.y;
     const dGoal = Math.hypot(toGoalX, toGoalY);
     const cosGoal = (dir.x * toGoalX + dir.y * toGoalY) / (dGoal || 1);
-    const shooting = dGoal < 32 && cosGoal > 0.85;
+    const shooting = dGoal < 32 && cosGoal > 0.85 && power > 0.3;
 
-    if (!shooting && !(type === 'ground' && power > 0.65)) {
-      // Ayuda al pase: busca un compañero en la dirección apuntada.
+    if (!shooting && power > KICK.tapPower + 0.01) {
+      // Ayuda al pase: si hay un compañero en la dirección apuntada, el balón va hacia él.
+      // La fuerza es la del medidor: si te quedas corto o te pasas, es cosa tuya.
       const cone = type === 'ground' ? 0.93 : 0.88;
       let best = null, bestScore = -Infinity;
       for (const t of team.players) {
@@ -144,13 +204,9 @@ export class Human {
         const c = (tx * dir.x + ty * dir.y) / td;
         if (c < cone) continue;
         const score = c * 2 - td / 40;
-        if (score > bestScore) { bestScore = score; best = { x: p.x + tx, y: p.y + ty }; }
+        if (score > bestScore) { bestScore = score; best = { x: tx / td, y: ty / td }; }
       }
-      if (best) {
-        p.passTo(ball, best.x, best.y, type === 'loft');
-        match.onKick(p, type);
-        return;
-      }
+      if (best) dir = best;
     }
     // Efecto: la dirección perpendicular que pulses al soltar curva el balón.
     const spin = shooting ? (inp.y * team.dir) * -3 * Math.abs(dir.x) : 0;

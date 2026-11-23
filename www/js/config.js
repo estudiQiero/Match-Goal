@@ -38,15 +38,33 @@ export const PLAYER = {
   slideTime: 0.55,
   slideSpeed: 10,
   fallTime: 1.0,
-  jumpSpeed: 4.0,        // velocidad de despegue del salto (≈ 0,8 m de altura)
+  jumpSpeed: 4.0,
+  // Conducción a toques: el balón nunca va pegado al pie.
+  touchReach: 0.6,       // distancia a la que puede tocar el balón al correr
+  touchSide: 0.55,       // cuánto puede estar el balón a un lado y aún tocarlo
+  touchCooldown: 0.26,   // tiempo mínimo entre toques
+  touchPush: 1.18,       // el balón sale a esta proporción de su velocidad (algo más rápido que él)
+  loseDist: 2.4,         // si el balón se aleja más que esto, deja de tenerlo
+  kickReach: 1.0,        // distancia a la que puede golpear el balón        // velocidad de despegue del salto (≈ 0,8 m de altura)
   headReach: 0.9,        // distancia horizontal a la que llega de cabeza
 };
 
 export const KICK = {
-  chargeTime: 0.75,      // tiempo en llenar el medidor
-  groundMin: 9, groundMax: 31,
-  loftMin: 9, loftMax: 25,
-  loftVzMin: 5, loftVzMax: 11,
+  // Con fuerza 0 el balón apenas avanza un par de metros (toque); con fuerza 1, un chut.
+  // La curva (potencia > 1) da más precisión en los pases flojos.
+  groundMin: 3, groundMax: 31,
+  loftMin: 5, loftMax: 25,
+  loftVzMin: 3, loftVzMax: 11,
+  curve: 1.3,
+  // Medidor de fuerza (segundos).
+  autoUp: 1.0,           // automático: de flojo a fuerte
+  autoDown: 0.5,         // automático: de vuelta a flojo
+  manualUp: 2.0,         // manteniendo el botón: de flojo a fuerte (y lo mismo de vuelta)
+  holdTime: 0.2,         // a partir de aquí la pulsación cuenta como «mantener»
+  doubleTap: 0.2,        // tiempo para la segunda pulsación de un doble toque
+  tapPower: 0.12,        // fuerza del pase corto de la doble pulsación
+  touchPower: 0.02,      // toque cortito si te pasas de fuerza y el medidor vuelve a cero
+  queueTime: 0.4,        // si el balón no está al alcance, el golpeo espera hasta esto
   headerSpeed: 14,
   volleySpeed: 22,
 };

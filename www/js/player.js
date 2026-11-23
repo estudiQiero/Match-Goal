@@ -108,10 +108,12 @@ export class Player {
     dx /= d; dy /= d;
     let v, vz;
     switch (type) {
-      case 'loft':
-        v = KICK.loftMin + (KICK.loftMax - KICK.loftMin) * power;
-        vz = KICK.loftVzMin + (KICK.loftVzMax - KICK.loftVzMin) * power;
+      case 'loft': {
+        const pc = Math.pow(power, KICK.curve);
+        v = KICK.loftMin + (KICK.loftMax - KICK.loftMin) * pc;
+        vz = KICK.loftVzMin + (KICK.loftVzMax - KICK.loftVzMin) * pc;
         break;
+      }
       case 'header':
         v = KICK.headerSpeed * (0.6 + power * 0.5);
         vz = 1 + power * 2;
@@ -121,7 +123,7 @@ export class Player {
         vz = 1.5 + power * 2.5;
         break;
       default:
-        v = KICK.groundMin + (KICK.groundMax - KICK.groundMin) * power;
+        v = KICK.groundMin + (KICK.groundMax - KICK.groundMin) * Math.pow(power, KICK.curve);
         vz = power > 0.7 ? (power - 0.7) * 10 : 0;   // un chut muy fuerte se levanta
     }
     ball.kick(dx * v, dy * v, vz, spin);

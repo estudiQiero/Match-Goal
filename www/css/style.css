@@ -169,3 +169,10 @@ body:not(.playing) #touch, body:not(.has-human) #touch { display: none; }
   h1 { font-size: 36px; }
   .panel { padding: 18px; }
 }
+
+/* Mando */
+.pad-box { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; }
+.pad-status { margin: 0 0 10px; color: var(--muted); font-size: 13px; }
+.pad-status b { color: var(--text); }
+.pad-prompt { margin: 10px 0 0; font-weight: 700; color: var(--accent); }
+.pad-box button { padding: 8px 14px; font-size: 14px; }

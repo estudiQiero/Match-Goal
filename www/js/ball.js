@@ -12,7 +12,8 @@ export class Ball {
     this.x = x; this.y = y; this.z = 0;
     this.vx = 0; this.vy = 0; this.vz = 0;
     this.spin = 0;          // aceleración lateral (efecto), m/s²
-    this.owner = null;      // jugador que la controla
+    this.owner = null;      // jugador que la controla (la conduce a toques: no va pegada)
+    this.attached = false;  // pegada al jugador: en las manos del portero o esperando un saque
     this.lastTouch = null;  // último jugador que la tocó
     this.inNet = null;      // 'left' | 'right' cuando ha entrado en una portería
     this.rot = 0;           // rotación visual
@@ -34,7 +35,7 @@ export class Ball {
     let event = null;
     this.age = (this.age || 0) + dt;
 
-    if (!this.owner) {
+    if (!this.attached) {
       // Efecto: aceleración perpendicular a la velocidad.
       const s = this.speed;
       if (s > 1 && this.spin) {

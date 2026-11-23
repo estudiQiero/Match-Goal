@@ -3,7 +3,7 @@ import { FORMATIONS, MENTALITIES, PASSING } from './tactics.js';
 import { Match } from './match.js';
 import { Human } from './human.js';
 import { Renderer } from './render.js';
-import { makeInput, setupTouch, SCHEMES } from './input.js';
+import { makeInput, setupTouch, schemeLabel, KEY_ACTIONS, getKeys, setKeys, resetKeys, keyLabel, rememberLabel, getPadMap, setPadMap, resetPadMap, connectedPads, padPressed } from './input.js';
 import { sfx } from './sound.js';
 
 const $ = s => document.querySelector(s);
@@ -72,20 +72,129 @@ $('#sound').checked = prefs.sound;
 function updateHelp() {
   const mode = $('#mode').value;
   const lines = [];
-  if (mode === '1p') lines.push(`<b>Tú</b>: ${SCHEMES.solo.label}`);
+  if (mode === '1p') lines.push(`<b>Tú</b>: ${schemeLabel('solo')}`);
   if (mode === '2p') {
-    lines.push(`<b>Jugador 1</b>: ${SCHEMES.p1.label}`);
-    lines.push(`<b>Jugador 2</b>: ${SCHEMES.p2.label}`);
+    lines.push(`<b>Jugador 1</b>: ${schemeLabel('p1')}`);
+    lines.push(`<b>Jugador 2</b>: ${schemeLabel('p2')}`);
   }
   if (mode !== 'cpu') {
-    lines.push('Mantén pulsado el botón de golpeo: el medidor sube y baja, suelta en el punto que quieras.');
-    lines.push('Sin balón: <b>raso</b> = entrada · <b>alto</b> = cambiar de jugador. Con el balón en el aire cerca: cabezazo o volea.');
-    lines.push('Mandos compatibles: A raso · B alto. <b>Esc</b> = pausa y tácticas.');
+    lines.push('Con el balón: <b>pulsación seca</b> = golpeo con la fuerza que marca el medidor de encima de la cabeza · <b>mantener</b> = cargas tú la fuerza (si te pasas, baja y acabas dando un toque corto) · <b>doble pulsación</b> = pase corto flojo.');
+    lines.push('El balón no va pegado al pie: lo conduces a toques. Si giras de golpe se te puede quedar atrás.');
+    lines.push('Sin balón: <b>raso</b> = entrada · <b>alto</b> = cambiar de jugador. Con un balón alto cerca, cualquiera de los dos: salto y cabezazo.');
+    lines.push('<b>Esc</b> = pausa y tácticas.');
   }
   $('#help').innerHTML = lines.map(l => `<p>${l}</p>`).join('');
 }
 $('#mode').addEventListener('change', updateHelp);
 updateHelp();
+
+// ---------- Teclado: redefinir teclas ----------
+
+let keyAssign = null;       // { player, step, map }
+
+function keysStatus() {
+  $('#keys-status').innerHTML =
+    `<b>Jugador 1</b>: ${schemeLabel('p1')}<br><b>Jugador 2</b>: ${schemeLabel('p2')}<br>` +
+    'En el modo de 1 jugador valen las teclas de los dos.';
+}
+
+function keyPrompt(extra = '') {
+  const [, name] = KEY_ACTIONS[keyAssign.step];
+  $('#keys-prompt').textContent = `${extra}Jugador ${keyAssign.player === 'p1' ? 1 : 2}: pulsa la tecla para ${name} (Esc cancela)`;
+}
+
+function startKeyAssign(player) {
+  keyAssign = { player, step: 0, map: {} };
+  $('#keys-prompt').hidden = false;
+  keyPrompt();
+}
+
+// Recoge la tecla antes que el juego y que el menú (fase de captura), para que no haga nada más.
+window.addEventListener('keydown', e => {
+  if (!keyAssign) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (e.repeat) return;
+  if (e.code === 'Escape') {
+    keyAssign = null;
+    $('#keys-prompt').textContent = 'Cancelado: se quedan las teclas que había.';
+    return;
+  }
+  // No se puede repetir una tecla en el mismo jugador.
+  const used = Object.values(keyAssign.map).flat();
+  if (used.includes(e.code)) { keyPrompt(`«${keyLabel(e.code)}» ya está usada. `); return; }
+  rememberLabel(e);
+  keyAssign.map[KEY_ACTIONS[keyAssign.step][0]] = [e.code];
+  keyAssign.step++;
+  if (keyAssign.step < KEY_ACTIONS.length) { keyPrompt(); return; }
+  const p = keyAssign.player;
+  setKeys(p, keyAssign.map);
+  keyAssign = null;
+  $('#keys-prompt').textContent = `Teclas del jugador ${p === 'p1' ? 1 : 2} guardadas.`;
+  // Si el otro jugador tenía alguna de estas teclas, se le quitan (las demás se quedan).
+  const other = p === 'p1' ? 'p2' : 'p1', mine = Object.values(getKeys(p)).flat();
+  const o = getKeys(other), fixed = {};
+  for (const [k] of KEY_ACTIONS) fixed[k] = o[k].filter(c => !mine.includes(c));
+  setKeys(other, fixed);
+  keysStatus(); updateHelp();
+}, true);
+
+$('#keys-p1').addEventListener('click', e => { e.currentTarget.blur(); startKeyAssign('p1'); });
+$('#keys-p2').addEventListener('click', e => { e.currentTarget.blur(); startKeyAssign('p2'); });
+$('#keys-reset').addEventListener('click', () => {
+  resetKeys(); keyAssign = null;
+  $('#keys-prompt').hidden = false; $('#keys-prompt').textContent = 'Teclas por defecto.';
+  keysStatus(); updateHelp();
+});
+keysStatus();
+
+// ---------- Mando: estado y asignación de botones ----------
+
+const PAD_STEPS = [
+  ['raso', 'RASO (pase o chut raso, entrada)'],
+  ['alto', 'ALTO (pase o chut alto, cambiar de jugador)'],
+  ['pausa', 'PAUSA'],
+];
+let assign = null;          // { step, map, wasDown }
+
+function padStatus() {
+  const pads = connectedPads();
+  const m = getPadMap();
+  const names = pads.map((g, i) => `<b>${i === 0 ? 'Jugador 1' : 'Jugador 2'}</b>: ${g.id.replace(/\(.*?\)/g, '').trim() || 'mando'}`);
+  $('#pad-status').innerHTML = pads.length
+    ? `${names.join(' · ')}<br>Botones: raso ${m.raso.join('/')} · alto ${m.alto.join('/')} · pausa ${m.pausa.join('/')}`
+    : 'Mando: no detectado (conéctalo y pulsa cualquier botón)';
+}
+
+$('#pad-assign').addEventListener('click', () => {
+  if (!connectedPads().length) { padStatus(); $('#pad-prompt').hidden = false; $('#pad-prompt').textContent = 'Conecta el mando y pulsa un botón para que el navegador lo vea.'; return; }
+  assign = { step: 0, map: {}, wasDown: true };
+  $('#pad-prompt').hidden = false;
+  $('#pad-prompt').textContent = `Pulsa en el mando el botón para ${PAD_STEPS[0][1]}`;
+});
+$('#pad-reset').addEventListener('click', () => { resetPadMap(); assign = null; $('#pad-prompt').hidden = true; padStatus(); });
+
+// Se llama en cada fotograma mientras está el menú: detecta el mando y recoge los botones.
+function pollPadMenu() {
+  if ($('#menu').hidden) return;
+  padStatus();
+  if (!assign) return;
+  const g = connectedPads()[0];
+  if (!g) return;
+  const down = g.buttons.findIndex(b => b.pressed);
+  if (down < 0) { assign.wasDown = false; return; }
+  if (assign.wasDown) return;           // hay que soltar antes de pulsar el siguiente
+  assign.wasDown = true;
+  const [key] = PAD_STEPS[assign.step];
+  assign.map[key] = [down];
+  assign.step++;
+  if (assign.step < PAD_STEPS.length) {
+    $('#pad-prompt').textContent = `Pulsa en el mando el botón para ${PAD_STEPS[assign.step][1]}`;
+  } else {
+    setPadMap(assign.map);
+    assign = null;
+    $('#pad-prompt').textContent = 'Botones guardados.';
+  }
+}
 
 const SKILL = { facil: 0.82, normal: 0.95, dificil: 1.06 };
 
@@ -191,7 +300,7 @@ canvas.addEventListener('pointerdown', () => { if (match?.state === 'end') toMen
 let startWas = false;
 function pollPadStart() {
   const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
-  const now = pads.some(g => g.buttons[9]?.pressed);
+  const now = !assign && pads.some(g => padPressed(g, getPadMap().pausa));
   if (now && !startWas && match) (paused ? closePause() : openPause());
   startWas = now;
 }
@@ -203,6 +312,7 @@ function frame(t) {
   const dt = Math.max(0, Math.min(0.05, (t - last) / 1000));
   last = t;
   pollPadStart();
+  pollPadMenu();
   if (match) {
     if (!paused) {
       // Pasos fijos para que la física sea estable.

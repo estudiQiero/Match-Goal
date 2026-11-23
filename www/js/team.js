@@ -1,4 +1,4 @@
-import { PITCH } from './config.js';
+import { PITCH, PLAYER } from './config.js';
 import { FORMATIONS, MENTALITIES, PASSING } from './tactics.js';
 import { Player } from './player.js';
 
@@ -174,6 +174,14 @@ export class Team {
     const nearOpp = opp.nearestTo(p.x, p.y);
     const pressure = nearOpp ? dist(nearOpp.x, nearOpp.y, p.x, p.y) : 99;
 
+    // El balón va a toques: si se le ha ido un poco, primero lo alcanza (sin decidir nada aún).
+    const dBall = dist(p.x, p.y, ball.x, ball.y);
+    if (!p.mustPass && dBall > PLAYER.kickReach) {
+      const t = Math.min(0.4, dBall / 8);
+      p.moveTo(ball.x + ball.vx * t, ball.y + ball.vy * t, 1, 0.05);
+      return;
+    }
+
     if (p.thinkT <= 0 || p.mustPass) {
       p.thinkT = 0.22 + (1 - p.skill) * 0.4 + Math.random() * 0.15;
 
@@ -233,7 +241,7 @@ export class Team {
     const err = (1.4 - p.skill) * (Math.random() - 0.5) * 4 + (Math.random() - 0.5) * dShot * 0.12;
     const ty = CY + side * (PITCH.goalWidth / 2 - 0.6 - Math.random() * 2) + err;
     const dGoal = dist(p.x, p.y, gx, ty);
-    const power = clamp(0.6 + dGoal / 45 + Math.random() * 0.15, 0.6, 0.95);
+    const power = clamp(0.75 + dGoal / 60 + Math.random() * 0.1, 0.75, 1);
     p.kick(ball, gx - p.x, ty - p.y, power, 'ground', (Math.random() - 0.5) * 4);
     match.onKick(p, 'shot');
   }

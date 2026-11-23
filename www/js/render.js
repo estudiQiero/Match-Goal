@@ -41,6 +41,8 @@ const GRAIN = (() => {
 
 const L = PITCH.length, W = PITCH.width, CY = W / 2;
 const HUMAN_COLORS = { 1: '#ffd23f', 2: '#4fd1ff' };
+// Colores de las 8 rayitas del medidor de fuerza: de verde (flojo) a rojo (fuerte).
+const METER_COLORS = ['#3ddc84', '#3ddc84', '#8fe05a', '#c8e04a', '#ffd23f', '#ffa53f', '#ff7043', '#ff4d4d'];
 // Blanco de las líneas, algo apagado para que no destaque más que los jugadores.
 // Desgaste de las líneas: ruido suave pegado al campo. En unos pocos tramos la cal está gastada:
 // la línea se apaga y pierde píxeles sueltos.
@@ -542,34 +544,30 @@ export class Renderer {
     }
   }
 
-  // Aro en el suelo y flecha encima del jugador que manejas, en píxeles gordos.
+  // Aro en el suelo y, encima de la cabeza, el medidor de fuerza del jugador que manejas.
   humanMarker(h) {
     const c = this.ctx, p = h.player;
     const [x, y, u] = this.P(p.x, p.y);
     const col = HUMAN_COLORS[h.id];
     const ry = Math.max(PIXEL * 1.5, Math.abs(this.P(p.x, p.y + 0.6)[1] - this.P(p.x, p.y - 0.6)[1]) / 2);
     pixelEllipseRing(c, x, y, 0.6 * u, ry, col);
-    const ty = y - 2.05 * u;
-    const hw = Math.max(2, Math.round(0.16 * u / PIXEL));        // medio ancho de la flecha, en píxeles gordos
-    const tx = snap(x), top = snap(ty - 0.06 * u);
-    c.fillStyle = col;
-    for (let r = 0; r <= hw; r++) c.fillRect(tx - (hw - r) * PIXEL, top + r * PIXEL, (2 * (hw - r) + 1) * PIXEL, PIXEL);
 
-    // Medidor de golpeo: casillas de colores por tramos (verde, amarillo, rojo), sin degradado.
+    // Medidor: 8 rayitas verticales que se encienden de izquierda a derecha (flojo → fuerte).
+    // En automático va y viene solo; manteniendo el botón lo cargas tú y se subraya en blanco.
     const m = h.meter;
-    if (m !== null) {
-      const cols = Math.max(25, Math.round(1.8 * u / PIXEL)), rows = Math.max(3, Math.round(0.2 * u / PIXEL));
-      const bw = cols * PIXEL, bh = rows * PIXEL;
-      const bx = snap(x - bw / 2), by = snap(ty - 0.25 * u - bh);
-      c.fillStyle = 'rgba(0,0,0,0.6)';
-      c.fillRect(bx - PIXEL, by - PIXEL, bw + 2 * PIXEL, bh + 2 * PIXEL);
-      const full = Math.round(cols * m);
-      for (let i = 0; i < full; i++) {
-        const t = i / cols;
-        c.fillStyle = t < 0.35 ? '#3ddc84' : t < 0.6 ? '#b6e04a' : t < 0.8 ? '#ffd23f' : '#ff4d4d';
-        c.fillRect(bx + i * PIXEL, by, PIXEL, bh);
-      }
-      drawPixelText(c, h.charge.type === 'loft' ? 'ALTO' : 'RASO', bx + bw / 2, by - 2 * PIXEL - 3.5 * PIXEL, PIXEL, '#fff');
+    const N = 8, TW = 1, GAP = 1, TH = 5;                 // en píxeles de dibujo
+    const w = (N * TW + (N - 1) * GAP) * PIXEL;
+    const lift = Math.round((p.z || 0) * this.s0 / PIXEL) * PIXEL;
+    const bx = snap(x - w / 2), by = snap(y - lift - (SPRITE_H + 4 + TH) * PIXEL);
+    let lit = Math.round(m.value * N);
+    if (m.value > 0.02) lit = Math.max(1, lit);
+    for (let i = 0; i < N; i++) {
+      c.fillStyle = i < lit ? METER_COLORS[i] : 'rgba(0,0,0,0.35)';
+      c.fillRect(bx + i * (TW + GAP) * PIXEL, by, TW * PIXEL, TH * PIXEL);
+    }
+    if (m.manual) {
+      c.fillStyle = '#ffffff';
+      c.fillRect(bx, by + (TH + 1) * PIXEL, w, PIXEL);
     }
   }
 

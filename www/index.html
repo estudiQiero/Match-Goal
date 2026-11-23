@@ -44,6 +44,26 @@
         <label class="check"><input type="checkbox" id="sound"> Sonido</label>
       </div>
 
+      <div class="pad-box">
+        <p class="pad-status"><b>Teclado</b></p>
+        <p id="keys-status" class="pad-status"></p>
+        <div class="buttons">
+          <button id="keys-p1" type="button">Redefinir teclas · Jugador 1</button>
+          <button id="keys-p2" type="button">Redefinir teclas · Jugador 2</button>
+          <button id="keys-reset" type="button">Teclas por defecto</button>
+        </div>
+        <p id="keys-prompt" class="pad-prompt" hidden></p>
+      </div>
+
+      <div class="pad-box">
+        <p id="pad-status" class="pad-status">Mando: no detectado (conéctalo y pulsa cualquier botón)</p>
+        <div class="buttons">
+          <button id="pad-assign" type="button">Asignar botones del mando</button>
+          <button id="pad-reset" type="button">Botones por defecto</button>
+        </div>
+        <p id="pad-prompt" class="pad-prompt" hidden></p>
+      </div>
+
       <div class="teams">
         <fieldset data-team="home">
           <legend>Local</legend>

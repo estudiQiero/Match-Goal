@@ -126,7 +126,9 @@ export class Match {
     p.stealCD = 0.4;
     p.holdT = 0;
     p.thinkT = 0.35 + Math.random() * 0.45;
-    ball.vx = ball.vy = ball.vz = 0;
+    p.touchCD = 0;
+    // Primer control: el balón queda amortiguado a sus pies.
+    ball.vx = p.vx * 0.6; ball.vy = p.vy * 0.6; ball.vz = 0;
   }
 
   onKick(p, type) {
@@ -203,25 +205,89 @@ export class Match {
     }
   }
 
+  // Conducción. El balón solo va pegado en las manos del portero y en los saques;
+  // el resto del tiempo rueda libre y el jugador lo va empujando con toques cortos.
   dribble(dt) {
     const ball = this.ball;
     const p = ball.owner;
+    ball.attached = false;
     if (!p) return;
     if (p.state !== 'normal' && p.state !== 'dive' && p.state !== 'jump') { ball.owner = null; p.hasBall = false; return; }
-    const off = p.isGK ? 0.35 : 0.55;
-    const tx = p.x + p.fx * off, ty = p.y + p.fy * off;
-    const k = Math.min(1, dt * 16);
-    ball.x += (tx - ball.x) * k;
-    ball.y += (ty - ball.y) * k;
-    ball.z = p.isGK && !p.mustPass ? 1.1 + p.z : 0;
-    ball.vx = p.vx; ball.vy = p.vy; ball.vz = 0;
+    if (p.isGK || p.mustPass) {
+      const off = p.isGK ? 0.35 : 0.55;
+      const tx = p.x + p.fx * off, ty = p.y + p.fy * off;
+      const k = Math.min(1, dt * 16);
+      ball.x += (tx - ball.x) * k;
+      ball.y += (ty - ball.y) * k;
+      ball.z = p.isGK && !p.mustPass ? 1.1 + p.z : 0;
+      ball.vx = p.vx; ball.vy = p.vy; ball.vz = 0;
+      ball.spin = 0;
+      ball.attached = true;
+      return;
+    }
+
+    const dx = ball.x - p.x, dy = ball.y - p.y, d = Math.hypot(dx, dy);
+    // Se le ha escapado: el balón queda suelto y se lo lleva quien llegue antes (él también).
+    if (d > PLAYER.loseDist) { ball.owner = null; p.hasBall = false; return; }
+    p.touchCD = Math.max(0, (p.touchCD || 0) - dt);
+    if (ball.z > 0.3 || p.state !== 'normal') return;
+
+    const sp = Math.hypot(p.vx, p.vy);
+    if (sp < 0.8) {
+      // Parado o casi: controla el balón y lo deja delante del pie (si lo tiene cerca).
+      if (d < 0.9) {
+        const tx = p.x + p.fx * 0.45, ty = p.y + p.fy * 0.45;
+        const k = 1 - Math.exp(-6 * dt);
+        ball.vx += ((tx - ball.x) * 3 - ball.vx) * k;
+        ball.vy += ((ty - ball.y) * 3 - ball.vy) * k;
+      }
+      return;
+    }
+
+    // Corriendo: toca el balón cuando lo tiene delante y a su alcance.
+    const ux = p.vx / sp, uy = p.vy / sp;
+    const fwd = dx * ux + dy * uy, side = -dx * uy + dy * ux;
+    if (p.touchCD > 0 || d > PLAYER.touchReach || fwd < -0.15 || Math.abs(side) > PLAYER.touchSide) return;
+    // El toque sale hacia donde quiere ir (y no exactamente hacia donde mira): así se gira con el balón.
+    let mx = p.mx, my = p.my;
+    const ml = Math.hypot(mx, my);
+    if (ml < 0.2) { mx = ux; my = uy; } else { mx /= ml; my /= ml; }
+    // Cuanto menos hábil, más largo y más torcido el toque.
+    const clumsy = Math.max(0, 1.1 - p.skill);
+    // Se toca según la velocidad a la que quiere ir (al arrancar aún va despacio, pero acelera enseguida).
+    const want = (sp + Math.max(sp, Math.min(1, ml) * p.maxSpeed * p.skill * 0.88)) / 2;
+    const push = want * (PLAYER.touchPush + Math.random() * 0.12 + clumsy * 0.8);
+    const ang = (Math.random() - 0.5) * (0.05 + clumsy * 0.9);
+    const c = Math.cos(ang), s = Math.sin(ang);
+    ball.vx = (mx * c - my * s) * push;
+    ball.vy = (mx * s + my * c) * push;
+    ball.vz = 0;
     ball.spin = 0;
+    ball.lastTouch = p;
+    p.touchCD = PLAYER.touchCooldown;
   }
 
   contacts(dt) {
     const ball = this.ball;
     const owner = ball.owner;
     const players = this.players;
+
+    // Balón que se le ha alejado al que lo conduce: lo coge quien esté más cerca y a su alcance.
+    if (owner && !ball.attached && ball.z < 0.6) {
+      const dOwn = dist(owner.x, owner.y, ball.x, ball.y);
+      if (dOwn > 0.9) {
+        for (const o of players) {
+          if (o === owner || o.state !== 'normal' || o.kickCD > 0) continue;
+          const d = dist(o.x, o.y, ball.x, ball.y);
+          const rel = Math.hypot(ball.vx - o.vx, ball.vy - o.vy);
+          if (d < PLAYER.controlDist && d < dOwn - 0.3 && rel < PLAYER.controlMaxSpeed) {
+            this.giveBall(o);
+            if (o.team !== owner.team) sfx.kick(0.3);
+            return;
+          }
+        }
+      }
+    }
 
     // Robos al poseedor.
     if (owner && owner.stealCD <= 0 && !(owner.isGK && !owner.mustPass)) {

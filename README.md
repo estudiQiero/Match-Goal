@@ -24,12 +24,21 @@ Abre http://localhost:8090.
 | | Jugador 1 (modo 1P) | Jugador 1 (modo 2P) | Jugador 2 | Mando |
 |---|---|---|---|---|
 | Mover | Q arriba · A abajo · O izquierda · P derecha (o flechas) | Q A O P | Flechas | Stick / cruceta |
-| Raso / entrada | Espacio | Espacio | `.` | A |
-| Alto / cambiar jugador | Z o M | Z o M | `-` | B |
-| Pausa y tácticas | Esc | Esc | | Start |
+| Raso / entrada | Espacio | Espacio | `.` | A (asignable) |
+| Alto / cambiar jugador | Z o M | Z o M | `-` | B (asignable) |
+| Pausa y tácticas | Esc | Esc | | Start (asignable) |
 
-Mantén el botón de golpeo: el medidor sube y baja. Suelta en la potencia que quieras.
-Si apuntas a un compañero, el pase sale dirigido a él; si apuntas a portería, es un chut libre.
+Estas son las teclas por defecto. En el menú se pueden cambiar con **Redefinir teclas** (Jugador 1 y Jugador 2), y los botones del mando con **Asignar botones del mando**, que sirve para cualquier mando o joystick. En el modo de 1 jugador valen las teclas de los dos jugadores.
+
+**Conducción.** El balón nunca va pegado al pie: el jugador lo lleva a toques cortos. Si giras de golpe o el balón se va a un lado y no lo corriges, se te queda atrás o se escapa.
+
+**Fuerza del golpeo.** Encima del jugador que manejas hay un medidor de 8 rayitas que va solo de flojo a fuerte (1 s) y vuelve (0,5 s):
+
+- **Pulsación seca**: golpeo con la fuerza que marcaba el medidor al pulsar.
+- **Mantener**: la fuerza la cargas tú (2 s hasta el máximo, y el medidor se subraya). Si te pasas, baja; si llega a cero, no hay golpeo y solo das un toque corto.
+- **Doble pulsación**: pase corto flojo.
+
+El botón decide si el golpeo va **raso** o **alto**. Si apuntas a un compañero, el balón va hacia él con la fuerza que hayas puesto; si apuntas a portería, es un chut libre.
 
 ## Estructura
 
