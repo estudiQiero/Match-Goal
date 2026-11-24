@@ -25,7 +25,8 @@ Abre http://localhost:8090.
 |---|---|---|---|---|
 | Mover | Q arriba · A abajo · O izquierda · P derecha (o flechas) | Q A O P | Flechas | Stick / cruceta |
 | Raso / entrada | Espacio | Espacio | `.` | A (asignable) |
-| Alto / cambiar jugador | Intro | Intro | `-` | B (asignable) |
+| Alto / cabezazo | Intro | Intro | `-` | B (asignable) |
+| Cambiar de jugador | Cmd | Cmd | `,` | X (asignable) |
 | Pausa y tácticas | Esc | Esc | | Start (asignable) |
 
 Estas son las teclas por defecto. En el menú se pueden cambiar con **Redefinir teclas** (Jugador 1 y Jugador 2), y los botones del mando con **Asignar botones del mando**, que sirve para cualquier mando o joystick. En el modo de 1 jugador valen las teclas de los dos jugadores.
@@ -34,9 +35,12 @@ Estas son las teclas por defecto. En el menú se pueden cambiar con **Redefinir 
 
 **Fuerza del golpeo.** Encima del jugador que manejas hay un medidor de 8 rayitas que va solo de flojo a fuerte (1 s) y vuelve (0,5 s):
 
-- **Pulsación seca**: golpeo con la fuerza que marcaba el medidor al pulsar.
-- **Mantener**: la fuerza la cargas tú (2 s hasta el máximo, y el medidor se subraya). Si te pasas, baja; si llega a cero, no hay golpeo y solo das un toque corto.
-- **Doble pulsación**: pase corto flojo.
+- **Pulsación seca**: al soltar, golpeo con la fuerza que marcaba el medidor al pulsar.
+- **Mantener**: la fuerza la cargas tú (2 s hasta el máximo, y el medidor se subraya); al soltar golpeas y el medidor vuelve a ir solo. Si te pasas, baja; si llega a cero, no hay golpeo y solo das un toque corto.
+
+Sin balón, **raso** es una entrada solo si tienes cerca un rival disputando el balón; si no, es un pequeño **acelerón** (que cansa más).
+
+**Cansancio.** Cada jugador lleva tres puntos encima de la cabeza: verdes si está fresco, luego verde-naranja, naranja, naranja-rojo y rojo. Cuanto más cansado, menos corre (en rojo, apenas). Correr, conducir y los acelerones cansan; parado o andando se recupera, y en el descanso también. El jugador que manejas lo muestra en el aro del suelo, que gira en verde, naranja o rojo. Un jugador normal acaba el partido en naranja; si usas mucho a uno, llegará al rojo.
 
 El botón decide si el golpeo va **raso** o **alto**. Si apuntas a un compañero, el balón va hacia él con la fuerza que hayas puesto; si apuntas a portería, es un chut libre.
 

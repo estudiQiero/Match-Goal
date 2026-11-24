@@ -26,7 +26,8 @@ export class Team {
 
   setFormation(name) {
     this.formation = name;
-    FORMATIONS[name].forEach((s, i) => { this.players[i].slot = s; this.players[i].role = s.role; });
+    // Por el número de cada jugador (en el entrenamiento no están todos).
+    for (const p of this.players) { const s = FORMATIONS[name][p.index]; p.slot = s; p.role = s.role; }
   }
 
   get ownGoalX() { return this.dir > 0 ? 0 : L; }

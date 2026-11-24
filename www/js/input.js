@@ -1,15 +1,26 @@
 // Entradas: teclado, mandos (Gamepad API) y controles táctiles.
-// Todas devuelven { x, y, a, b } con x/y entre -1 y 1.
-//  a = golpeo raso / entrada
-//  b = golpeo alto / cambiar jugador
+// Todas devuelven { x, y, a, b, sw } con x/y entre -1 y 1.
+//  a  = golpeo raso / entrada (o acelerón si no hay nadie cerca)
+//  b  = golpeo alto / salto y cabezazo
+//  sw = cambiar de jugador
 
 const keys = new Set();
+const isMeta = c => c === 'MetaLeft' || c === 'MetaRight';
 window.addEventListener('keydown', e => {
   keys.add(e.code);
   const t = e.target && e.target.tagName;
-  if ((e.code.startsWith('Arrow') || e.code === 'Space') && t !== 'INPUT' && t !== 'SELECT') e.preventDefault();
+  if (t === 'INPUT' || t === 'SELECT') return;
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+  // Cmd + una tecla del juego no debe hacer lo del navegador (Cmd+A seleccionar, Cmd+P imprimir…).
+  // Cmd+Q (salir) y Cmd+W (cerrar) no se pueden bloquear: ojo con ellas.
+  if (e.metaKey && !isMeta(e.code)) e.preventDefault();
 });
-window.addEventListener('keyup', e => keys.delete(e.code));
+window.addEventListener('keyup', e => {
+  keys.delete(e.code);
+  // En el Mac, mientras Cmd está pulsado el navegador no avisa de las teclas que se sueltan:
+  // al soltar Cmd se dan todas por soltadas para que ninguna se quede «pegada».
+  if (isMeta(e.code)) keys.clear();
+});
 window.addEventListener('blur', () => keys.clear());
 
 // ---------- Teclado ----------
@@ -17,16 +28,17 @@ window.addEventListener('blur', () => keys.clear());
 // En el modo de 1 jugador valen las teclas de los dos juegos (por defecto, Q A O P o las flechas).
 export const KEY_ACTIONS = [
   ['up', 'ARRIBA'], ['down', 'ABAJO'], ['left', 'IZQUIERDA'], ['right', 'DERECHA'],
-  ['a', 'RASO (pase o chut raso, entrada)'], ['b', 'ALTO (pase o chut alto, cambiar de jugador)'],
+  ['a', 'RASO (pase o chut raso, entrada)'], ['b', 'ALTO (pase o chut alto, cabezazo)'],
+  ['sw', 'CAMBIAR DE JUGADOR'],
 ];
 const KEYS_DEFAULT = {
-  p1: { up: ['KeyQ'], down: ['KeyA'], left: ['KeyO'], right: ['KeyP'], a: ['Space'], b: ['Enter'] },
-  p2: { up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'], a: ['Period'], b: ['Slash'] },
+  p1: { up: ['KeyQ'], down: ['KeyA'], left: ['KeyO'], right: ['KeyP'], a: ['Space'], b: ['Enter'], sw: ['MetaLeft', 'MetaRight'] },
+  p2: { up: ['ArrowUp'], down: ['ArrowDown'], left: ['ArrowLeft'], right: ['ArrowRight'], a: ['Period'], b: ['Slash'], sw: ['Comma'] },
 };
 // Nombre que se ve de cada tecla. Las que se asignan en el menú guardan el carácter real
 // de tu teclado (en uno español, la tecla «Slash» es el «-»).
 const LABELS_DEFAULT = {
-  Space: 'Espacio', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+  MetaRight: 'Cmd dcha.', Space: 'Espacio', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
   Period: '.', Slash: '-', Comma: ',', Enter: 'Intro', ShiftLeft: 'Mayús', ShiftRight: 'Mayús dcha.',
   ControlLeft: 'Ctrl', AltLeft: 'Alt', MetaLeft: 'Cmd', Tab: 'Tab', Backspace: 'Borrar',
 };
@@ -77,7 +89,7 @@ function scheme(name) {
 // Texto de ayuda: «Q arriba · A abajo · … · Espacio raso · Intro alto».
 export function schemeLabel(name) {
   const m = scheme(name), names = c => c.length ? c.map(keyLabel).join(' o ') : '(sin tecla)';
-  return `${names(m.up)} arriba · ${names(m.down)} abajo · ${names(m.left)} izquierda · ${names(m.right)} derecha · ${names(m.a)} raso · ${names(m.b)} alto`;
+  return `${names(m.up)} arriba · ${names(m.down)} abajo · ${names(m.left)} izquierda · ${names(m.right)} derecha · ${names(m.a)} raso · ${names(m.b)} alto · ${names(m.sw || [])} cambiar`;
 }
 
 const held = list => list.some(c => keys.has(c));
@@ -88,14 +100,14 @@ function keyboard(name) {
     let x = (held(s.right) ? 1 : 0) - (held(s.left) ? 1 : 0);
     let y = (held(s.down) ? 1 : 0) - (held(s.up) ? 1 : 0);
     if (x && y) { x *= Math.SQRT1_2; y *= Math.SQRT1_2; }
-    return { x, y, a: held(s.a), b: held(s.b) };
+    return { x, y, a: held(s.a), b: held(s.b), sw: held(s.sw || []) };
   };
 }
 
 // ---------- Mandos ----------
 // Botones asignados por el jugador (pantalla «Asignar botones» del menú). Se guardan en el navegador.
 // Por defecto, el mapa estándar (Xbox / PlayStation): A o Cruz = raso, B o Círculo = alto, Start = pausa.
-const PAD_DEFAULT = { raso: [0], alto: [1], pausa: [9] };
+const PAD_DEFAULT = { raso: [0], alto: [1], cambiar: [2], pausa: [9] };
 let padMap = loadPadMap();
 
 function loadPadMap() {
@@ -138,7 +150,7 @@ function gamepad(index) {
     }
     const l = Math.hypot(x, y);
     if (l < 0.25) { x = 0; y = 0; } else if (l > 1) { x /= l; y /= l; }
-    return { x, y, a: padPressed(g, padMap.raso), b: padPressed(g, padMap.alto) };
+    return { x, y, a: padPressed(g, padMap.raso), b: padPressed(g, padMap.alto), sw: padPressed(g, padMap.cambiar) };
   };
 }
 
@@ -202,7 +214,7 @@ export function makeInput(sources) {
   });
   return {
     poll() {
-      const out = { x: 0, y: 0, a: false, b: false };
+      const out = { x: 0, y: 0, a: false, b: false, sw: false };
       for (const f of fns) {
         const v = f();
         if (!v) continue;
@@ -210,6 +222,7 @@ export function makeInput(sources) {
         if (Math.abs(v.y) > Math.abs(out.y)) out.y = v.y;
         out.a = out.a || v.a;
         out.b = out.b || v.b;
+        out.sw = out.sw || !!v.sw;
       }
       return out;
     },

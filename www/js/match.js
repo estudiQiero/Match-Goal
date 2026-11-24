@@ -1,4 +1,4 @@
-import { PITCH, PLAYER, BALL } from './config.js';
+import { PITCH, PLAYER, BALL, FATIGUE } from './config.js';
 import { Ball } from './ball.js';
 import { Team } from './team.js';
 import { sfx } from './sound.js';
@@ -23,6 +23,13 @@ export class Match {
     this.home.opponent = this.away;
     this.away.opponent = this.home;
     this.teams = [this.home, this.away];
+    // Entrenamiento: sin tiempo, solo los porteros, tu jugador y quien hayas elegido.
+    this.training = opts.training || null;
+    if (this.training) {
+      const keep = (team, idx) => { team.players = team.players.filter(p => p.isGK || idx.includes(p.index)); };
+      keep(this.home, [6, 9].slice(0, 1 + this.training.mates));      // un medio (tú) y, si acaso, un delantero
+      keep(this.away, [2, 3, 1].slice(0, this.training.rivals));        // defensas centrales primero
+    }
     this.referee = new Referee();
     // Desgaste del césped y la cal: celdas de medio metro (con margen fuera del campo).
     // Empieza a cero y crece donde los jugadores pisan corriendo.
@@ -75,9 +82,13 @@ export class Match {
         p.hasBall = false; p.mustPass = false;
       }
     }
-    const taker = team.players.filter(p => p.role === 'FW')[0] || team.players[10];
+    // En el entrenamiento el saque siempre es tuyo.
+    if (this.training) team = this.home;
+    const field = team.players.filter(p => !p.isGK);
+    const fws = field.filter(p => p.role === 'FW');
+    const taker = fws[0] || field[field.length - 1];
     taker.place(L / 2 - team.dir * 0.4, CY);
-    const mate = team.players.filter(p => p.role === 'FW')[1] || team.players[9];
+    const mate = fws[1] || field.find(p => p !== taker);
     if (mate && mate !== taker) mate.place(L / 2 - team.dir * 0.5, CY + 6);
     this.giveBall(taker, true);
     // Todos quietos en su campo hasta el silbato; después solo actúa quien saca,
@@ -92,10 +103,17 @@ export class Match {
 
   setupRestart(kind, team, x, y) {
     const ball = this.ball;
-    ball.reset(x, y);
     let taker;
     if (kind === 'goalkick') taker = team.gk;
     else taker = team.nearestTo(x, y, p => !p.isGK);
+    // Entrenamiento: si el saque es para un equipo sin jugadores de campo, es para el tuyo
+    // (un córner a tu favor no tiene sentido en tu propia portería: saque de puerta).
+    if (!taker) {
+      team = team.opponent;
+      if (kind === 'corner') { kind = 'goalkick'; taker = team.gk; x = team.ownGoalX + team.dir * 5.5; y = CY; }
+      else taker = team.nearestTo(x, y, p => !p.isGK);
+    }
+    ball.reset(x, y);
     taker.place(x - (kind === 'throw' ? 0 : 0), y);
     // Mira hacia dentro del campo.
     taker.faceTo(kind === 'corner' ? team.oppGoalX - team.dir * 11 : L / 2, CY);
@@ -127,8 +145,10 @@ export class Match {
     p.holdT = 0;
     p.thinkT = 0.35 + Math.random() * 0.45;
     p.touchCD = 0;
-    // Primer control: el balón queda amortiguado a sus pies.
-    ball.vx = p.vx * 0.6; ball.vy = p.vy * 0.6; ball.vz = 0;
+    // Primer control: durante un instante atrae el balón al pie, delante y hacia donde quiere ir.
+    p.trapT = PLAYER.trapTime;
+    if (p.isGK || mustPass) { ball.vx = ball.vy = 0; }
+    ball.vz = 0;
   }
 
   onKick(p, type) {
@@ -180,12 +200,15 @@ export class Match {
     if (this.state === 'play') {
       this.clock += dt;
       this.trample(dt);
+      // Cansancio, en minutos de partido (45 por parte, dure lo que dure la parte de verdad).
+      const gameMin = dt * 45 / this.halfDuration;
+      for (const p of this.players) p.tire(gameMin);
       const owner = this.ball.owner || this.ball.lastTouch;
       if (owner) this.stats.possession[owner.team === this.home ? 0 : 1] += dt;
       this.contacts(dt);
       if (this.ball.onPost) { sfx.post(); this.ball.onPost = false; }
       if (ev) this.handleEvent(ev);
-      else if (this.clock >= this.halfDuration) this.endHalf();
+      else if (this.clock >= this.halfDuration && !this.training) this.endHalf();
     }
   }
 
@@ -235,29 +258,37 @@ export class Match {
     if (ball.z > 0.3 || p.state !== 'normal') return;
 
     const sp = Math.hypot(p.vx, p.vy);
-    if (sp < 0.8) {
-      // Parado o casi: controla el balón y lo deja delante del pie (si lo tiene cerca).
-      if (d < 0.9) {
-        const tx = p.x + p.fx * 0.45, ty = p.y + p.fy * 0.45;
-        const k = 1 - Math.exp(-6 * dt);
-        ball.vx += ((tx - ball.x) * 3 - ball.vx) * k;
-        ball.vy += ((ty - ball.y) * 3 - ball.vy) * k;
-      }
-      return;
-    }
-
-    // Corriendo: toca el balón cuando lo tiene delante y a su alcance.
-    const ux = p.vx / sp, uy = p.vy / sp;
-    const fwd = dx * ux + dy * uy, side = -dx * uy + dy * ux;
-    if (p.touchCD > 0 || d > PLAYER.touchReach || fwd < -0.15 || Math.abs(side) > PLAYER.touchSide) return;
-    // El toque sale hacia donde quiere ir (y no exactamente hacia donde mira): así se gira con el balón.
+    // Hacia dónde quiere ir: lo que pide el mando (o la IA); si no pide nada, hacia donde corre o mira.
     let mx = p.mx, my = p.my;
     const ml = Math.hypot(mx, my);
-    if (ml < 0.2) { mx = ux; my = uy; } else { mx /= ml; my /= ml; }
+    if (ml >= 0.2) { mx /= ml; my /= ml; }
+    else if (sp > 0.8) { mx = p.vx / sp; my = p.vy / sp; }
+    else { mx = p.fx; my = p.fy; }
+    const fwd = dx * mx + dy * my, side = -dx * my + dy * mx;
+
+    // Control: si el balón está dentro de su radio pero no delante, en la línea por la que quiere
+    // correr (le llega de lado, por detrás, o acaba de hacerse con él), lo atrae con el pie y lo deja
+    // delante, orientado hacia donde quiere ir. Parado, lo mismo: lo deja delante del pie.
+    const ahead = fwd > 0.15 && Math.abs(side) < PLAYER.touchSide * 0.7;
+    if (d < PLAYER.controlDist && (p.trapT > 0 || sp < 0.8 || !ahead)) {
+      p.trapT = Math.max(0, (p.trapT || 0) - dt);
+      const tx = p.x + mx * 0.45, ty = p.y + my * 0.45;
+      const k = 1 - Math.exp(-PLAYER.trapPull * dt);
+      ball.vx += (p.vx + (tx - ball.x) * 8 - ball.vx) * k;
+      ball.vy += (p.vy + (ty - ball.y) * 8 - ball.vy) * k;
+      ball.vz = 0; ball.spin = 0;
+      ball.lastTouch = p;
+      return;
+    }
+    if (sp < 0.8) return;
+
+    // Corriendo: toca el balón cuando lo tiene delante y a su alcance.
+    if (p.touchCD > 0 || d > PLAYER.touchReach || fwd < -0.15 || Math.abs(side) > PLAYER.touchSide) return;
+    // El toque sale hacia donde quiere ir (y no exactamente hacia donde mira): así se gira con el balón.
     // Cuanto menos hábil, más largo y más torcido el toque.
     const clumsy = Math.max(0, 1.1 - p.skill);
     // Se toca según la velocidad a la que quiere ir (al arrancar aún va despacio, pero acelera enseguida).
-    const want = (sp + Math.max(sp, Math.min(1, ml) * p.maxSpeed * p.skill * 0.88)) / 2;
+    const want = (sp + Math.max(sp, Math.min(1, ml) * p.maxSpeed * p.skill * PLAYER.dribbleSpeed)) / 2;
     const push = want * (PLAYER.touchPush + Math.random() * 0.12 + clumsy * 0.8);
     const ang = (Math.random() - 0.5) * (0.05 + clumsy * 0.9);
     const c = Math.cos(ang), s = Math.sin(ang);
@@ -510,6 +541,8 @@ export class Match {
     } else if (this.state === 'half') {
       this.half = 2;
       this.clock = 0;
+      // En el descanso se recupera un poco.
+      for (const p of this.players) p.stamina = Math.min(1, p.stamina + FATIGUE.halfTime);
       for (const t of this.teams) t.dir *= -1;
       this.setupKickoff(this.away);
     }

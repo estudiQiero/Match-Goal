@@ -65,6 +65,7 @@ function readTeamForm(side) {
 fillTeamForm('home');
 fillTeamForm('away');
 $('#mode').value = prefs.mode;
+$('#training').value = prefs.training || '0-0';
 $('#half').value = prefs.halfMinutes;
 $('#difficulty').value = prefs.difficulty;
 $('#sound').checked = prefs.sound;
@@ -72,21 +73,29 @@ $('#sound').checked = prefs.sound;
 function updateHelp() {
   const mode = $('#mode').value;
   const lines = [];
-  if (mode === '1p') lines.push(`<b>Tú</b>: ${schemeLabel('solo')}`);
+  if (mode === '1p' || mode === 'training') lines.push(`<b>Tú</b>: ${schemeLabel('solo')}`);
+  if (mode === 'training') lines.push('Entrenamiento sin tiempo, siempre con los dos porteros. <b>Esc</b> para salir.');
   if (mode === '2p') {
     lines.push(`<b>Jugador 1</b>: ${schemeLabel('p1')}`);
     lines.push(`<b>Jugador 2</b>: ${schemeLabel('p2')}`);
   }
   if (mode !== 'cpu') {
-    lines.push('Con el balón: <b>pulsación seca</b> = golpeo con la fuerza que marca el medidor de encima de la cabeza · <b>mantener</b> = cargas tú la fuerza (si te pasas, baja y acabas dando un toque corto) · <b>doble pulsación</b> = pase corto flojo.');
+    lines.push('Con el balón: <b>pulsación seca</b> = golpeo con la fuerza que marca el medidor de encima de la cabeza · <b>mantener</b> = cargas tú la fuerza en 2 s y golpeas al soltar (si te pasas, baja y acabas dando un toque corto).');
     lines.push('El balón no va pegado al pie: lo conduces a toques. Si giras de golpe se te puede quedar atrás.');
-    lines.push('Sin balón: <b>raso</b> = entrada · <b>alto</b> = cambiar de jugador. Con un balón alto cerca, cualquiera de los dos: salto y cabezazo.');
+    lines.push('Sin balón: <b>raso</b> = entrada si tienes un rival cerca, o acelerón si no · <b>cambiar</b> = otro jugador. Con un balón alto cerca, raso o alto: salto y cabezazo.');
     lines.push('<b>Esc</b> = pausa y tácticas.');
   }
   $('#help').innerHTML = lines.map(l => `<p>${l}</p>`).join('');
 }
-$('#mode').addEventListener('change', updateHelp);
+// El modo entrenamiento elige con quién entrenas y no tiene duración.
+function updateModeBoxes() {
+  const training = $('#mode').value === 'training';
+  $('#training-box').hidden = !training;
+  $('#half-box').hidden = training;
+}
+$('#mode').addEventListener('change', () => { updateHelp(); updateModeBoxes(); });
 updateHelp();
+updateModeBoxes();
 
 // ---------- Teclado: redefinir teclas ----------
 
@@ -151,7 +160,8 @@ keysStatus();
 
 const PAD_STEPS = [
   ['raso', 'RASO (pase o chut raso, entrada)'],
-  ['alto', 'ALTO (pase o chut alto, cambiar de jugador)'],
+  ['alto', 'ALTO (pase o chut alto, cabezazo)'],
+  ['cambiar', 'CAMBIAR DE JUGADOR'],
   ['pausa', 'PAUSA'],
 ];
 let assign = null;          // { step, map, wasDown }
@@ -161,7 +171,7 @@ function padStatus() {
   const m = getPadMap();
   const names = pads.map((g, i) => `<b>${i === 0 ? 'Jugador 1' : 'Jugador 2'}</b>: ${g.id.replace(/\(.*?\)/g, '').trim() || 'mando'}`);
   $('#pad-status').innerHTML = pads.length
-    ? `${names.join(' · ')}<br>Botones: raso ${m.raso.join('/')} · alto ${m.alto.join('/')} · pausa ${m.pausa.join('/')}`
+    ? `${names.join(' · ')}<br>Botones: raso ${m.raso.join('/')} · alto ${m.alto.join('/')} · cambiar ${m.cambiar.join('/')} · pausa ${m.pausa.join('/')}`
     : 'Mando: no detectado (conéctalo y pulsa cualquier botón)';
 }
 
@@ -205,6 +215,7 @@ function startMatch() {
   Object.assign(prefs, {
     mode: $('#mode').value, halfMinutes: +$('#half').value,
     difficulty: $('#difficulty').value, sound: $('#sound').checked, home, away,
+    training: $('#training').value,
   });
   savePrefs(prefs);
   sfx.setEnabled(prefs.sound);
@@ -219,9 +230,12 @@ function startMatch() {
     halfMinutes: prefs.halfMinutes,
     home: mk(home, mode === 'cpu'),
     away: mk(away, mode !== '2p'),
+    training: mode === 'training'
+      ? (([mates, rivals]) => ({ mates, rivals }))($('#training').value.split('-').map(Number))
+      : null,
   });
 
-  if (mode === '1p') {
+  if (mode === '1p' || mode === 'training') {
     const src = [{ type: 'keys', scheme: 'solo' }, { type: 'pad', index: 0 }];
     if (hasTouch) src.push({ type: 'touch' });
     match.addHuman(new Human(match.home, makeInput(src), 1));

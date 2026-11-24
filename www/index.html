@@ -24,9 +24,19 @@
             <option value="1p">1 jugador contra la CPU</option>
             <option value="2p">2 jugadores</option>
             <option value="cpu">CPU contra CPU</option>
+            <option value="training">Entrenamiento</option>
           </select>
         </label>
-        <label>Duración de cada parte
+        <label id="training-box" hidden>Entrenamiento
+          <select id="training">
+            <option value="0-0">Solo (sin rivales)</option>
+            <option value="1-0">Con 1 compañero para pasar</option>
+            <option value="0-1">Contra 1 rival</option>
+            <option value="0-2">Contra 2 rivales</option>
+            <option value="0-3">Contra 3 rivales</option>
+          </select>
+        </label>
+        <label id="half-box">Duración de cada parte
           <select id="half">
             <option value="2">2 min</option>
             <option value="3">3 min</option>

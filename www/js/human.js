@@ -11,8 +11,8 @@ export class Human {
     this.input = input;
     this.id = id;               // 1 o 2, para el indicador de color
     this.player = null;
-    this.prev = { a: false, b: false };
-    this.press = null;          // botón de golpeo: { type, phase: 'press'|'manual'|'wait', t, auto }
+    this.prev = { a: false, b: false, sw: false };
+    this.press = null;          // botón de golpeo: { type, phase: 'press'|'manual', t, auto }
     this.queued = null;         // golpeo decidido esperando a tener el balón al alcance: { type, power, t }
     this.autoT = Math.random(); // reloj del medidor automático
     this.switchT = 0;
@@ -52,7 +52,8 @@ export class Human {
     const inp = this.input.poll();
     const aDown = inp.a && !this.prev.a, bDown = inp.b && !this.prev.b;
     const aUp = !inp.a && this.prev.a, bUp = !inp.b && this.prev.b;
-    this.prev = { a: inp.a, b: inp.b };
+    const swDown = inp.sw && !this.prev.sw;
+    this.prev = { a: inp.a, b: inp.b, sw: !!inp.sw };
     this.switchT = Math.max(0, this.switchT - dt);
 
     // ¿A quién manejo?
@@ -93,6 +94,13 @@ export class Human {
     this.queued = null;
     if (match.state !== 'play') { this.pendingAerial = null; return; }
 
+    // Cambiar de jugador: al más cercano al balón (que no sea el portero ni el que ya llevas).
+    if (swDown) {
+      const near = team.nearestTo(ball.x, ball.y, q => !q.isGK && q !== p);
+      if (near) { this.setPlayer(near); this.switchT = 1.0; }
+      return;
+    }
+
     const d = dist(p.x, p.y, ball.x, ball.y);
     // Balón a su alcance ahora mismo (de pie o en el aire): volea o cabezazo.
     const rel = ball.z - p.z;
@@ -110,31 +118,40 @@ export class Human {
     if (aDown) {
       if (aerial) this.strikeAerial(match, inp, 1);
       else if (high && p.jump(1)) this.pendingAerial = 1;
-      else p.slide();
+      // Solo se tira si tiene un rival cerca disputando el balón; si no, no tiene sentido:
+      // la pulsación se convierte en un pequeño acelerón.
+      else if (this.rivalToTackle(match)) p.slide();
+      else p.burst();
     } else if (bDown) {
       if (aerial) this.strikeAerial(match, inp, 0.7);
       else if (high && p.jump(1)) this.pendingAerial = 0.7;
-      else {
-        const near = team.nearestTo(ball.x, ball.y, q => !q.isGK && q !== p);
-        if (near) { this.setPlayer(near); this.switchT = 1.0; }
-      }
     }
   }
 
+  // ¿Hay un rival al que entrar? Cerca de ti y con el balón (o con el balón cerca de los dos).
+  rivalToTackle(match) {
+    const p = this.player, ball = match.ball;
+    const dBall = Math.hypot(ball.x - p.x, ball.y - p.y);
+    return this.team.opponent.players.some(o => {
+      const d = Math.hypot(o.x - p.x, o.y - p.y);
+      return d < PLAYER.tackleRange && (ball.owner === o || (dBall < PLAYER.tackleRange && Math.hypot(ball.x - o.x, ball.y - o.y) < PLAYER.tackleRange));
+    });
+  }
+
   // Botones de golpeo con el balón:
-  //  pulsación seca  → golpeo con la fuerza que marcaba el medidor automático al pulsar
-  //  doble pulsación → pase corto flojo
-  //  mantener        → el medidor lo cargas tú; si te pasas, baja y al llegar a cero solo das un toque corto
+  //  pulsación seca → al soltar, golpeo con la fuerza que marcaba el medidor automático al pulsar
+  //  mantener       → el medidor lo cargas tú (de flojo a lleno en manualUp s); al soltar golpea y
+  //                   el medidor vuelve a su bucle. Si te pasas, baja; al llegar a cero solo das un toque corto.
   kickInput(match, inp, dt, e) {
     const k = this.press;
-    const down = { ground: e.aDown, loft: e.bDown }, up = { ground: e.aUp, loft: e.bUp };
+    const up = { ground: e.aUp, loft: e.bUp };
 
     if (!k) {
       const type = e.aDown ? 'ground' : e.bDown ? 'loft' : null;
       if (type) this.press = { type, phase: 'press', t: 0, auto: this.autoMeter };
     } else if (k.phase === 'press') {
       k.t += dt;
-      if (up[k.type]) { k.phase = 'wait'; k.wait = 0; }
+      if (up[k.type]) { this.queue(k.type, k.auto); this.press = null; }   // pulsación seca
       else if (k.t >= KICK.holdTime) k.phase = 'manual';
     } else if (k.phase === 'manual') {
       k.t += dt;
@@ -145,15 +162,6 @@ export class Human {
         this.press = null;
       } else if (up[k.type]) {
         this.queue(k.type, v);
-        this.press = null;
-      }
-    } else if (k.phase === 'wait') {
-      k.wait += dt;
-      if (down[k.type]) {
-        this.queue(k.type, KICK.tapPower);              // doble pulsación
-        this.press = null;
-      } else if (k.wait >= KICK.doubleTap) {
-        this.queue(k.type, k.auto);                     // pulsación seca
         this.press = null;
       }
     }
@@ -191,7 +199,7 @@ export class Human {
     const cosGoal = (dir.x * toGoalX + dir.y * toGoalY) / (dGoal || 1);
     const shooting = dGoal < 32 && cosGoal > 0.85 && power > 0.3;
 
-    if (!shooting && power > KICK.tapPower + 0.01) {
+    if (!shooting && power > KICK.assistMin) {
       // Ayuda al pase: si hay un compañero en la dirección apuntada, el balón va hacia él.
       // La fuerza es la del medidor: si te quedas corto o te pasas, es cosa tuya.
       const cone = type === 'ground' ? 0.93 : 0.88;

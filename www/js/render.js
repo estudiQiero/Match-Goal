@@ -41,6 +41,11 @@ const GRAIN = (() => {
 
 const L = PITCH.length, W = PITCH.width, CY = W / 2;
 const HUMAN_COLORS = { 1: '#ffd23f', 2: '#4fd1ff' };
+// Cansancio: colores de los puntos y combinación en cada nivel (0 fresco … 4 agotado).
+const FATIGUE_COLORS = { g: '#3ddc84', o: '#ffa53f', r: '#ff4d4d' };
+const FATIGUE_DOTS = ['ggg', 'ggo', 'ooo', 'oor', 'rrr'];
+// Color del aro: verde (niveles 0-1), naranja (2-3) o rojo (4).
+const RING_RGB = [[61, 220, 132], [255, 165, 63], [255, 77, 77]];
 // Colores de las 8 rayitas del medidor de fuerza: de verde (flojo) a rojo (fuerte).
 const METER_COLORS = ['#3ddc84', '#3ddc84', '#8fe05a', '#c8e04a', '#ffd23f', '#ffa53f', '#ff7043', '#ff4d4d'];
 // Blanco de las líneas, algo apagado para que no destaque más que los jugadores.
@@ -161,6 +166,8 @@ export class Renderer {
     }
     for (const p of [...match.players, ref]) if (p.y < near) items.push({ y: p.y, draw: () => this.player(p) });
     if (b.y < near) items.push({ y: b.y + 0.01, draw: () => this.ball(b) });
+    // El aro del jugador que manejas va en el suelo, por debajo de todos los dibujos.
+    for (const h of humans) if (h.player && h.player.y < near) this.humanGround(h);
     items.sort((a, z) => a.y - z.y);
     for (const it of items) it.draw();
 
@@ -519,6 +526,19 @@ export class Renderer {
     // Todos los jugadores con el mismo tamaño de píxel, estén cerca o lejos.
     c.drawImage(spr.canvas, -spr.ax * PIXEL, -spr.ay * PIXEL, spr.canvas.width * PIXEL, spr.canvas.height * PIXEL);
     c.restore();
+
+    // Cansancio: tres puntos encima de la cabeza (el jugador que manejas lo lleva en el aro del suelo).
+    if (p.stamina !== undefined && !p.human && p.state !== 'slide' && p.state !== 'fallen' && p.state !== 'dive') {
+      const dots = FATIGUE_DOTS[p.fatigueLevel];
+      const S = 2, G = 1, w = (3 * S + 2 * G) * PIXEL;
+      const bx = snap(x - w / 2), by = snap(y - lift - (SPRITE_H + 3 + S) * PIXEL);
+      c.fillStyle = 'rgba(0,0,0,0.45)';
+      c.fillRect(bx - PIXEL, by - PIXEL, w + 2 * PIXEL, (S + 2) * PIXEL);
+      for (let i = 0; i < 3; i++) {
+        c.fillStyle = FATIGUE_COLORS[dots[i]];
+        c.fillRect(bx + i * (S + G) * PIXEL, by, S * PIXEL, S * PIXEL);
+      }
+    }
   }
 
   // Balón en píxeles: blanco, sin contorno, con volumen en grises (luz de arriba a la izquierda).
@@ -552,13 +572,38 @@ export class Renderer {
     }
   }
 
-  // Aro en el suelo y, encima de la cabeza, el medidor de fuerza del jugador que manejas.
-  humanMarker(h) {
+  // Aro del jugador que manejas, en el suelo. Dentro, su cansancio: verde, naranja o rojo
+  // translúcido, en degradado de oscuro a claro, girando hacia donde corre (más rápido cuanto más corre).
+  humanGround(h) {
     const c = this.ctx, p = h.player;
     const [x, y, u] = this.P(p.x, p.y);
-    const col = HUMAN_COLORS[h.id];
-    const ry = Math.max(PIXEL * 1.5, Math.abs(this.P(p.x, p.y + 0.6)[1] - this.P(p.x, p.y - 0.6)[1]) / 2);
-    pixelEllipseRing(c, x, y, 0.6 * u, ry, col);
+    const R = 0.45;                                       // radio del aro en metros
+    const rx = R * u, ry = Math.max(PIXEL * 1.5, Math.abs(this.P(p.x, p.y + R)[1] - this.P(p.x, p.y - R)[1]) / 2);
+    const now = performance.now() / 1000;
+    const dt = Math.min(0.1, now - (h.ringT ?? now)); h.ringT = now;
+    const sp = Math.hypot(p.vx, p.vy);
+    h.ringRot = (h.ringRot || 0) + (p.fx >= 0 ? 1 : -1) * (1 + sp * 0.5) * dt;
+    const [r, g, b] = RING_RGB[Math.min(2, Math.floor((p.fatigueLevel + 1) / 2))];
+    const RX = rx / PIXEL, RY = ry / PIXEL, ox = x / PIXEL, oy = y / PIXEL;
+    for (let j = Math.floor(oy - RY); j <= Math.ceil(oy + RY); j++) {
+      for (let i = Math.floor(ox - RX); i <= Math.ceil(ox + RX); i++) {
+        const qx = (i + 0.5 - ox) / RX, qy = (j + 0.5 - oy) / RY;
+        if (qx * qx + qy * qy > 1) continue;
+        // Degradado por ángulo en 4 escalones (pixel art), del tono oscuro al claro.
+        let t = (Math.atan2(qy, qx) - h.ringRot) / (Math.PI * 2);
+        t -= Math.floor(t);
+        const k = 0.5 + 0.5 * (Math.floor(t * 4) / 3);
+        c.fillStyle = `rgba(${Math.round(r * k)},${Math.round(g * k)},${Math.round(b * k)},0.5)`;
+        c.fillRect(i * PIXEL, j * PIXEL, PIXEL, PIXEL);
+      }
+    }
+    pixelEllipseRing(c, x, y, rx, ry, HUMAN_COLORS[h.id]);
+  }
+
+  // Encima de la cabeza del jugador que manejas: el medidor de fuerza.
+  humanMarker(h) {
+    const c = this.ctx, p = h.player;
+    const [x, y] = this.P(p.x, p.y);
 
     // Medidor: 8 rayitas verticales que se encienden de izquierda a derecha (flojo → fuerte).
     // En automático va y viene solo; manteniendo el botón lo cargas tú y se subraya en blanco.
@@ -582,34 +627,45 @@ export class Renderer {
   // ---------- Indicadores en los bordes ----------
 
   // Jugadores fuera de cámara: un triángulo de píxeles gordos del color de la camiseta, en el borde
-  // izquierdo o derecho (un poco separado), a la altura de pantalla que les toca en el campo.
-  // El triángulo apunta hacia donde mira el jugador, y es más grande cuanto más cerca está
-  // del jugador que manejas (sin jugador humano, del balón).
+  // izquierdo o derecho, a la altura de pantalla que les toca en el campo, apuntando hacia donde mira.
+  // Cuanto más cerca está el jugador de entrar en pantalla, más se separa el triángulo del borde
+  // (hacia dentro) y algo más grande se hace. Cuando el jugador empieza a asomar, el triángulo
+  // se desliza hacia él y se desvanece hasta fundirse con el sprite.
   edgeDots(match) {
     const c = this.ctx;
-    const ref = match.humans?.[0]?.player || match.ball;
+    const APPROACH = 25;                          // metros fuera de pantalla a los que el triángulo empieza a acercarse
+    const MIN_N = 6, MAX_N = 11;                  // tamaño en píxeles de dibujo: lejos / a punto de entrar
+    const EDGE = 4 * PIXEL, INSET = 24 * PIXEL;   // separación del borde: lejos / a punto de entrar
     const dots = [];
     for (const p of match.players) {
       const [sx, sy, k] = this.P(p.x, Math.min(p.y, this.nearY), PLAYER.height / 2);
-      const half = 0.5 * k;                       // medio ancho del sprite, para que no salga con medio jugador aún visible
-      const side = sx + half < 0 ? -1 : sx - half > this.w ? 1 : 0;
-      if (!side) continue;
-      const near = Math.hypot(p.x - ref.x, p.y - ref.y);
-      dots.push({ p, side, sy, near });
+      const half = 0.5 * k;                       // medio ancho del sprite
+      // Px que le faltan al sprite para empezar a asomar (negativo: ya asoma).
+      const offL = -(sx + half), offR = sx - half - this.w;
+      const side = offL > -2 * half && sx < this.w / 2 ? -1 : offR > -2 * half && sx >= this.w / 2 ? 1 : 0;
+      if (!side) continue;                        // del todo dentro de la pantalla: no hay triángulo
+      const off = side < 0 ? offL : offR;
+      const t = off > 0 ? Math.max(0, Math.min(1, 1 - off / k / APPROACH)) : 1;   // 0 lejos, 1 a punto de entrar
+      const fade = off > 0 ? 0 : Math.min(1, -off / (2 * half));                   // 0 → 1 mientras asoma
+      dots.push({ p, side, sx, sy, t, fade });
     }
-    dots.sort((a, z) => z.near - a.near);         // los cercanos (grandes) encima
-    const margin = 8 * PIXEL;
-    for (const { p, side, sy, near } of dots) {
-      const n = Math.max(5, Math.round(14 - near / 4)); // tamaño en píxeles de dibujo: 14 pegado a ti, 5 a 36 m o más
+    dots.sort((a, z) => a.t - z.t);               // los cercanos (grandes) encima
+    for (const { p, side, sx, sy, t, fade } of dots) {
+      const n = Math.round(MIN_N + (MAX_N - MIN_N) * t);
       const size = n * PIXEL;
-      const x = snap(side < 0 ? margin : this.w - margin - size);
-      const y = snap(Math.max(margin, Math.min(this.h - margin - size, sy - size / 2)));
+      const inset = EDGE + (INSET - EDGE) * t;
+      const ex = side < 0 ? inset + size / 2 : this.w - inset - size / 2;   // centro junto al borde
+      const cx = ex + (sx - ex) * fade;           // al asomar, se desliza hacia el jugador
+      const x = snap(cx - size / 2);
+      const y = snap(Math.max(EDGE, Math.min(this.h - EDGE - size, sy - size / 2)));
+      c.globalAlpha = 1 - fade;
       // Dirección en pantalla hacia la que mira (la profundidad se ve acortada por la inclinación).
       const dx = p.fx, dy = p.fy * this.st;
       if (p.human) pixelTriangle(c, x, y, n, dx, dy, HUMAN_COLORS[p.human.id] || '#ffd23f', 2);
       pixelTriangle(c, x, y, n, dx, dy, 'rgb(22,62,26)', 1);
       pixelTriangle(c, x, y, n, dx, dy, p.team.color.shirt, 0);
     }
+    c.globalAlpha = 1;
   }
 
   // ---------- Marcador ----------
@@ -621,7 +677,7 @@ export class Renderer {
     const [h, a] = [match.home, match.away];
     const big = 3;                                              // tamaño de píxel de las letras del marcador
     const txt = `${h.name}  ${h.score} - ${a.score}  ${a.name}`;
-    const min = `${match.minute}'`;
+    const min = match.training ? 'ENTRENO' : `${match.minute}'`;
     const tW = pixelTextWidth(txt) * big, mW = pixelTextWidth(min) * big;
     const sw = 5 * PIXEL, gap = 6 * PIXEL;                      // muestras de color de cada equipo
     const tw = snap(gap + sw + gap + tW + gap + sw + gap + mW + gap);

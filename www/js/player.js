@@ -1,4 +1,4 @@
-import { PLAYER, KICK, PITCH } from './config.js';
+import { PLAYER, KICK, PITCH, FATIGUE } from './config.js';
 
 export class Player {
   constructor(team, index, slot) {
@@ -23,6 +23,9 @@ export class Player {
     this.z = 0; this.vz = 0;           // altura de los pies (salto)
     this.human = null;                 // controlador humano si lo maneja una persona
     this.skill = 1;
+    this.stamina = 1;                  // energía: 1 fresco, 0 agotado
+    this.burstT = 0;                   // acelerón en curso
+    this.burstCD = 0;
   }
 
   get isGK() { return this.role === 'GK'; }
@@ -53,6 +56,8 @@ export class Player {
     this.kickCD = Math.max(0, this.kickCD - dt);
     this.stealCD = Math.max(0, this.stealCD - dt);
     this.kickAnim = Math.max(0, this.kickAnim - dt);
+    this.burstT = Math.max(0, this.burstT - dt);
+    this.burstCD = Math.max(0, this.burstCD - dt);
     if (this.stateT > 0) {
       this.stateT -= dt;
       if (this.stateT <= 0) {
@@ -80,13 +85,15 @@ export class Player {
     } else if (this.state === 'fallen' || this.state === 'getup') {
       this.vx *= Math.exp(-8 * dt); this.vy *= Math.exp(-8 * dt);
     } else {
-      let max = this.maxSpeed * this.skill;
-      if (this.hasBall) max *= 0.88;
+      const lv = this.fatigueLevel;
+      let max = this.maxSpeed * this.skill * FATIGUE.speed[lv];
+      if (this.burstT > 0) max *= PLAYER.burstSpeed;
+      if (this.hasBall) max *= PLAYER.dribbleSpeed;
       if (this.hasBall && this.mustPass) max = 0;
       const tvx = this.mx * max, tvy = this.my * max;
       const dvx = tvx - this.vx, dvy = tvy - this.vy;
       const dv = Math.hypot(dvx, dvy);
-      const step = PLAYER.accel * dt;
+      const step = PLAYER.accel * FATIGUE.accel[lv] * (this.burstT > 0 ? 1.5 : 1) * dt;
       if (dv <= step) { this.vx = tvx; this.vy = tvy; }
       else { this.vx += (dvx / dv) * step; this.vy += (dvy / dv) * step; }
       const s = Math.hypot(this.mx, this.my);
@@ -164,6 +171,35 @@ export class Player {
     this.kickCD = PLAYER.kickCooldown;
     this.kickAnim = 0.25;
     this.fx = dx / d; this.fy = dy / d;
+  }
+
+  // Nivel de cansancio: 0 fresco (3 verdes) … 4 agotado (3 rojos).
+  get fatigueLevel() {
+    const s = this.stamina, L = FATIGUE.levels;
+    return s > L[0] ? 0 : s > L[1] ? 1 : s > L[2] ? 2 : s > L[3] ? 3 : 4;
+  }
+
+  // Gasta o recupera energía. gameMin = minutos de partido que han pasado en este paso.
+  tire(gameMin) {
+    const sp = Math.hypot(this.vx, this.vy);
+    if (sp > FATIGUE.walk) {
+      const e = Math.min(1.2, sp / PLAYER.speed);
+      let k = FATIGUE.drain * e * e;
+      if (this.hasBall) k *= FATIGUE.ballDrain;
+      if (this.burstT > 0) k *= FATIGUE.burstDrain;
+      this.stamina -= k * gameMin;
+    } else {
+      // Parado se recupera del todo; andando, menos.
+      this.stamina += FATIGUE.recover * (1 - sp / FATIGUE.walk * 0.7) * gameMin;
+    }
+    this.stamina = Math.max(0, Math.min(1, this.stamina));
+  }
+
+  // Acelerón corto (cuando se pulsa «raso» sin balón y sin nadie a quien entrar).
+  burst() {
+    if (this.state !== 'normal' || this.burstCD > 0) return;
+    this.burstT = PLAYER.burstTime;
+    this.burstCD = PLAYER.burstCooldown;
   }
 
   slide() {

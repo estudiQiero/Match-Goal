@@ -31,11 +31,16 @@ export const PLAYER = {
   height: 1.8,
   speed: 6.8,
   sprint: 8.2,
+  dribbleSpeed: 0.83,    // con el balón se corre algo más despacio (83 %): obliga a ir a toques
   accel: 22,
-  controlDist: 0.75,
+  controlDist: 0.8,      // radio de control: dentro de él, el jugador se hace con el balón y lo atrae al pie
   controlMaxSpeed: 15,   // por encima de esto el balón rebota en vez de controlarse
   kickCooldown: 0.35,
   slideTime: 0.55,
+  tackleRange: 3.5,      // solo hay entrada si un rival que disputa el balón está a menos de esto
+  burstTime: 0.6,        // acelerón: duración (s)
+  burstSpeed: 1.18,      // acelerón: cuánto más rápido
+  burstCooldown: 1.2,    // tiempo mínimo entre acelerones
   slideSpeed: 10,
   fallTime: 1.0,
   // Levantarse del suelo (segundos, al azar entre los dos valores): tirarse a por el balón
@@ -43,6 +48,8 @@ export const PLAYER = {
   getUp: { slide: [0.8, 1.3], fallen: [0.5, 0.9], dive: [0.5, 0.8] },
   jumpSpeed: 4.0,
   // Conducción a toques: el balón nunca va pegado al pie.
+  trapTime: 0.25,        // al hacerse con el balón, tiempo que tarda en colocárselo delante
+  trapPull: 14,          // fuerza con la que lo atrae (más = más rápido)
   touchReach: 0.6,       // distancia a la que puede tocar el balón al correr
   touchSide: 0.55,       // cuánto puede estar el balón a un lado y aún tocarlo
   touchCooldown: 0.26,   // tiempo mínimo entre toques
@@ -50,6 +57,21 @@ export const PLAYER = {
   loseDist: 2.4,         // si el balón se aleja más que esto, deja de tenerlo
   kickReach: 1.0,        // distancia a la que puede golpear el balón        // velocidad de despegue del salto (≈ 0,8 m de altura)
   headReach: 0.9,        // distancia horizontal a la que llega de cabeza
+};
+
+// Cansancio. Cada jugador tiene una energía de 1 (fresco) a 0 (agotado), medida en minutos de
+// partido (así cansa igual un partido de 2 minutos por parte que uno de 8).
+// 5 niveles: verde, verde-naranja, naranja, naranja-rojo y rojo. Cada uno rinde menos.
+export const FATIGUE = {
+  levels: [0.8, 0.6, 0.4, 0.2],       // energía mínima de los niveles 0..3 (por debajo de 0.2, nivel 4)
+  speed: [1, 0.97, 0.93, 0.85, 0.55], // velocidad máxima en cada nivel (en rojo, apenas corre)
+  accel: [1, 0.97, 0.92, 0.82, 0.6],  // y aceleración
+  drain: 0.020,                       // gasto por minuto de partido corriendo a tope
+  ballDrain: 1.3,                     // conducir el balón cansa algo más
+  burstDrain: 3,                      // y el acelerón, mucho más
+  recover: 0.012,                     // recuperación por minuto de partido parado
+  walk: 2.2,                          // por debajo de esta velocidad (m/s) ya se recupera algo
+  halfTime: 0.15,                     // lo que se recupera en el descanso
 };
 
 export const KICK = {
@@ -64,8 +86,7 @@ export const KICK = {
   autoDown: 0.5,         // automático: de vuelta a flojo
   manualUp: 2.0,         // manteniendo el botón: de flojo a fuerte (y lo mismo de vuelta)
   holdTime: 0.2,         // a partir de aquí la pulsación cuenta como «mantener»
-  doubleTap: 0.2,        // tiempo para la segunda pulsación de un doble toque
-  tapPower: 0.12,        // fuerza del pase corto de la doble pulsación
+  assistMin: 0.13,       // por debajo de esta fuerza no hay ayuda al pase (es un toque)
   touchPower: 0.02,      // toque cortito si te pasas de fuerza y el medidor vuelve a cero
   queueTime: 0.4,        // si el balón no está al alcance, el golpeo espera hasta esto
   headerSpeed: 14,
