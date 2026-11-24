@@ -626,8 +626,9 @@ export class Renderer {
 
   // ---------- Indicadores en los bordes ----------
 
-  // Jugadores fuera de cámara: un triángulo de píxeles gordos del color de la camiseta, en el borde
-  // izquierdo o derecho, a la altura de pantalla que les toca en el campo, apuntando hacia donde mira.
+  // Jugadores fuera de cámara: un triángulo de píxeles gordos del color de la camiseta en el borde
+  // de la pantalla por el que quedan fuera (izquierda, derecha, arriba o abajo), apuntando hacia
+  // donde mira el jugador. En los laterales va a su altura en pantalla; arriba y abajo, a su x.
   // Cuanto más cerca está el jugador de entrar en pantalla, más se separa el triángulo del borde
   // (hacia dentro) y algo más grande se hace. Cuando el jugador empieza a asomar, el triángulo
   // se desliza hacia él y se desvanece hasta fundirse con el sprite.
@@ -639,25 +640,43 @@ export class Renderer {
     const dots = [];
     for (const p of match.players) {
       const [sx, sy, k] = this.P(p.x, Math.min(p.y, this.nearY), PLAYER.height / 2);
-      const half = 0.5 * k;                       // medio ancho del sprite
-      // Px que le faltan al sprite para empezar a asomar (negativo: ya asoma).
-      const offL = -(sx + half), offR = sx - half - this.w;
-      const side = offL > -2 * half && sx < this.w / 2 ? -1 : offR > -2 * half && sx >= this.w / 2 ? 1 : 0;
-      if (!side) continue;                        // del todo dentro de la pantalla: no hay triángulo
-      const off = side < 0 ? offL : offR;
+      const hw = 0.5 * k, hh = 0.5 * PLAYER.height * k;   // medio ancho y medio alto del sprite
+      // Px que le faltan al sprite para empezar a asomar por cada borde (negativo: ya asoma),
+      // y cuánto mide el sprite en esa dirección (para el desvanecido).
+      const sides = [
+        ['L', -(sx + hw), 2 * hw], ['R', sx - hw - this.w, 2 * hw],
+        ['T', -(sy + hh), 2 * hh], ['B', sy - hh - this.h, 2 * hh],
+      ];
+      // El borde por el que más fuera está; si el sprite ya está entero dentro, no hay triángulo.
+      let [side, off, span] = sides[0];
+      for (const s of sides) if (s[1] / s[2] > off / span) [side, off, span] = s;
+      if (off <= -span) continue;
       const t = off > 0 ? Math.max(0, Math.min(1, 1 - off / k / APPROACH)) : 1;   // 0 lejos, 1 a punto de entrar
-      const fade = off > 0 ? 0 : Math.min(1, -off / (2 * half));                   // 0 → 1 mientras asoma
+      const fade = off > 0 ? 0 : Math.min(1, -off / span);                         // 0 → 1 mientras asoma
       dots.push({ p, side, sx, sy, t, fade });
     }
     dots.sort((a, z) => a.t - z.t);               // los cercanos (grandes) encima
+    const hud = this.hudBox;
     for (const { p, side, sx, sy, t, fade } of dots) {
       const n = Math.round(MIN_N + (MAX_N - MIN_N) * t);
-      const size = n * PIXEL;
+      const size = n * PIXEL, r = size / 2;
       const inset = EDGE + (INSET - EDGE) * t;
-      const ex = side < 0 ? inset + size / 2 : this.w - inset - size / 2;   // centro junto al borde
-      const cx = ex + (sx - ex) * fade;           // al asomar, se desliza hacia el jugador
-      const x = snap(cx - size / 2);
-      const y = snap(Math.max(EDGE, Math.min(this.h - EDGE - size, sy - size / 2)));
+      const clampX = v => Math.max(EDGE + r, Math.min(this.w - EDGE - r, v));
+      const clampY = v => Math.max(EDGE + r, Math.min(this.h - EDGE - r, v));
+      // Centro junto al borde.
+      let ex, ey;
+      if (side === 'L') { ex = inset + r; ey = clampY(sy); }
+      else if (side === 'R') { ex = this.w - inset - r; ey = clampY(sy); }
+      else if (side === 'B') { ex = clampX(sx); ey = this.h - inset - r; }
+      else {
+        ex = clampX(sx);
+        // Arriba, si cae bajo el marcador, se coloca por debajo de él.
+        const top = hud && ex + r > hud.x0 && ex - r < hud.x1 ? hud.bottom : 0;
+        ey = top + inset + r;
+      }
+      // Al asomar, se desliza hacia el jugador.
+      const x = snap(ex + (sx - ex) * fade - r);
+      const y = snap(ey + (sy - ey) * fade - r);
       c.globalAlpha = 1 - fade;
       // Dirección en pantalla hacia la que mira (la profundidad se ve acortada por la inclinación).
       const dx = p.fx, dy = p.fy * this.st;
@@ -695,6 +714,8 @@ export class Renderer {
     const y2 = y0 + th + 2 * PIXEL;
     pixelPanel(c, snap(this.w / 2 - tw2 / 2), y2, tw2, th2, 'rgba(10,14,20,0.6)');
     drawPixelText(c, tac, this.w / 2, y2 + th2 / 2, PIXEL, 'rgba(255,255,255,0.9)', false);
+    // Zona que ocupa el marcador: los triángulos de arriba se ponen por debajo (ver edgeDots).
+    this.hudBox = { x0: Math.min(x0, this.w / 2 - tw2 / 2), x1: Math.max(x0 + tw, this.w / 2 + tw2 / 2), bottom: y2 + th2 };
 
     if (match.messageT > 0) {
       // Mensajes en letras de píxeles gordos, sin contorno. Se encogen si no caben.

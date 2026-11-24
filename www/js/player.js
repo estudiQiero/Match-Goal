@@ -1,5 +1,17 @@
 import { PLAYER, KICK, PITCH, FATIGUE } from './config.js';
 
+// Gira el vector (fx, fy) hacia (tx, ty) como mucho maxStep radianes.
+// Por ángulo y no mezclando vectores: al mezclar, una media vuelta exacta (180°) se anula
+// en cada paso y el jugador se quedaba mirando hacia atrás mientras corría.
+export function turnToward(fx, fy, tx, ty, maxStep) {
+  const a = Math.atan2(fy, fx), b = Math.atan2(ty, tx);
+  let d = b - a;
+  d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;       // entre -π y π
+  if (Math.abs(d) >= Math.PI - 1e-6) d = Math.PI;         // justo detrás: gira siempre hacia un lado
+  const n = a + Math.max(-maxStep, Math.min(maxStep, d));
+  return [Math.cos(n), Math.sin(n)];
+}
+
 export class Player {
   constructor(team, index, slot) {
     this.team = team;
@@ -98,12 +110,8 @@ export class Player {
       else { this.vx += (dvx / dv) * step; this.vy += (dvy / dv) * step; }
       const s = Math.hypot(this.mx, this.my);
       if (s > 0.1) {
-        // Gira suavemente hacia la dirección de movimiento.
-        const t = Math.min(1, dt * 14);
-        this.fx += (this.mx / s - this.fx) * t;
-        this.fy += (this.my / s - this.fy) * t;
-        const fl = Math.hypot(this.fx, this.fy) || 1;
-        this.fx /= fl; this.fy /= fl;
+        // Gira hacia la dirección de movimiento a velocidad fija (también en una media vuelta).
+        [this.fx, this.fy] = turnToward(this.fx, this.fy, this.mx / s, this.my / s, PLAYER.turnRate * dt);
       }
     }
 

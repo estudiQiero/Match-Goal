@@ -58,4 +58,18 @@ const press = (m, keys, k) => { keys[k] = true; m.update(DT); keys[k] = false; m
   press(m, keys, 'b');
   check(h.player === me, 'alto, sin balón alto cerca, no cambia de jugador');
 }
+// 5) Media vuelta exacta (180°): el jugador debe girarse y no correr de espaldas.
+for (const [x0, y0] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7071, 0.7071]]) {
+  for (const withBall of [false, true]) {
+    const { m, me, keys } = setup();
+    m.ball.reset(withBall ? 40.5 : 70, 34);
+    if (withBall) m.giveBall(me);
+    keys.x = x0; keys.y = y0;
+    for (let i = 0; i < 90; i++) m.update(DT);         // corre 0,75 s en una dirección
+    keys.x = -x0; keys.y = -y0;                         // y pide justo la contraria
+    for (let i = 0; i < 60; i++) m.update(DT);          // 0,5 s
+    const facing = me.fx * -x0 + me.fy * -y0;           // 1 = mira hacia donde va
+    check(facing > 0.95, `media vuelta (${x0},${y0}) ${withBall ? 'con' : 'sin'} balón: se gira (mira ${facing.toFixed(2)})`);
+  }
+}
 console.log(fails ? `${fails} fallos` : 'todo bien');

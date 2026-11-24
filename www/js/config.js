@@ -33,6 +33,7 @@ export const PLAYER = {
   sprint: 8.2,
   dribbleSpeed: 0.83,    // con el balón se corre algo más despacio (83 %): obliga a ir a toques
   accel: 22,
+  turnRate: 12,          // velocidad de giro (rad/s): media vuelta en ~0,26 s
   controlDist: 0.8,      // radio de control: dentro de él, el jugador se hace con el balón y lo atrae al pie
   controlMaxSpeed: 15,   // por encima de esto el balón rebota en vez de controlarse
   kickCooldown: 0.35,

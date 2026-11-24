@@ -2,6 +2,7 @@
 // No toca el balón ni choca con nadie. Es tranquilo: se queda quieto mirando la jugada
 // y solo se recoloca cuando el balón se le aleja; casi siempre andando, trota si se queda muy lejos.
 import { PITCH } from './config.js';
+import { turnToward } from './player.js';
 
 const L = PITCH.length, W = PITCH.width, CY = W / 2;
 
@@ -60,8 +61,7 @@ export class Referee {
     if (sp < 0.6) { fx = ball.x - this.x; fy = ball.y - this.y; }
     const fl = Math.hypot(fx, fy);
     if (fl > 0.01) {
-      const t = Math.min(1, dt * 4);
-      this.fx += (fx / fl - this.fx) * t; this.fy += (fy / fl - this.fy) * t;
+      [this.fx, this.fy] = turnToward(this.fx, this.fy, fx / fl, fy / fl, 4 * dt);
     }
     this.anim += sp * dt * 1.6;
   }
