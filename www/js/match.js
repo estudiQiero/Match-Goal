@@ -1,4 +1,4 @@
-import { PITCH, PLAYER, BALL, FATIGUE } from './config.js';
+import { PITCH, PLAYER, BALL, FATIGUE, OUT, WALLS } from './config.js';
 import { Ball } from './ball.js';
 import { Team } from './team.js';
 import { sfx } from './sound.js';
@@ -99,6 +99,138 @@ export class Match {
     this.kickDelay = 0.3 + Math.random() * 0.5;   // reacción de quien saca tras el silbato (IA)
     this.restartTaker = taker;
     this.show('Saque inicial', 1.2);
+    this.restartName = 'Saque inicial';
+  }
+
+  // Quién saca y desde dónde (con los casos del entrenamiento sin jugadores de campo).
+  chooseRestart(kind, team, x, y) {
+    let taker;
+    if (kind === 'goalkick') taker = team.gk;
+    else taker = team.nearestTo(x, y, p => !p.isGK);
+    if (!taker) {
+      team = team.opponent;
+      if (kind === 'corner') { kind = 'goalkick'; taker = team.gk; x = team.ownGoalX + team.dir * 5.5; y = CY; }
+      else taker = team.nearestTo(x, y, p => !p.isGK);
+    }
+    return { kind, team, taker, x, y };
+  }
+
+  // El balón ha salido: pausa. Sigue rodando (o rebota en la valla, o se va a la grada), el que va
+  // a sacar va a por él, lo coge con las manos, lo lleva al punto del saque y desde ahí saca.
+  beginOut(kind, team, x, y) {
+    const r = this.chooseRestart(kind, team, x, y);
+    const ball = this.ball;
+    if (ball.owner) ball.owner.hasBall = false;
+    ball.owner = null;
+    ball.dead = true;
+    for (const p of this.players) { p.mustPass = false; p.carrying = false; p.throwIn = false; }
+    this.out = { ...r, fetcher: r.taker, phase: 'settle', t: 0, crowdT: 0, fetchT: 0 };
+    this.outActors = new Set([r.taker]);
+    this.state = 'out';
+    this.restartTaker = r.taker;
+    this.restartWait = 99;
+    const names = { throw: 'Saque de banda', corner: 'Córner', goalkick: 'Saque de puerta' };
+    this.show(names[r.kind], 1.5);
+    this.restartName = names[r.kind];
+    sfx.whistle(0.2);
+  }
+
+  // Durante la pausa: el que saca camina hacia el balón o, con él en las manos, hacia el punto del saque.
+  outMove() {
+    const o = this.out, ball = this.ball;
+    if (!o) return;
+    const f = o.fetcher || o.taker, p = o.taker;
+    // En un saque de puerta que recoge un defensa, el portero espera en el punto del saque.
+    if (f !== p && p.state === 'normal') p.moveTo(o.x, o.y, OUT.carrySpeed, 0.05);
+    if (f.state !== 'normal') return;
+    if (o.phase === 'fetch') f.moveTo(ball.x, ball.y, OUT.fetchSpeed, 0.05);
+    else if (o.phase === 'walk') {
+      // Lo lleva al punto del saque (o, si no es él quien saca, al portero que espera).
+      const tx = f === p ? o.x : p.x, ty = f === p ? o.y : p.y;
+      f.moveTo(tx, ty, OUT.carrySpeed, 0.05);
+    } else { f.mx = f.my = 0; }
+  }
+
+  // Quién va a por el balón, cuando ya se ha parado: el jugador del equipo que saca más cercano a él.
+  // En un saque de puerta, el portero si es quien está más cerca; si no, el defensa más cercano,
+  // que se lo lleva al portero para que saque.
+  pickFetcher() {
+    const o = this.out, ball = this.ball;
+    const near = o.team.nearestTo(ball.x, ball.y, p => !p.isGK && p.state === 'normal');
+    if (o.kind !== 'goalkick') {
+      if (near) { o.taker = near; o.fetcher = near; }
+      return;
+    }
+    const gk = o.team.gk;
+    const dGK = dist(gk.x, gk.y, ball.x, ball.y), dN = near ? dist(near.x, near.y, ball.x, ball.y) : Infinity;
+    o.taker = gk;
+    o.fetcher = dN + 3 < dGK ? near : gk;
+  }
+
+  outProgress(dt) {
+    const o = this.out, p = o.taker, ball = this.ball;
+    o.t += dt;
+    if (o.phase === 'settle') {
+      if (ball.inCrowd) {
+        // El público lo devuelve: aparece fuera, junto al punto del saque.
+        if ((o.crowdT += dt) > OUT.crowdReturn) {
+          const ox = o.x < L / 2 ? -1.2 : 1.2, oy = o.y < CY ? -1.2 : 1.2;
+          ball.reset(o.kind === 'throw' ? o.x : o.x + ox, o.kind === 'throw' ? o.y + oy : o.y);
+          ball.dead = true;
+          o.phase = 'fetch';
+        }
+      } else if ((o.t > OUT.settleMin && ball.speed < 0.6 && ball.z < 0.05) || o.t > OUT.settleMax) {
+        o.phase = 'fetch'; o.fetchT = 0;
+        this.pickFetcher();
+        this.restartTaker = o.taker;
+        this.outActors = new Set([o.taker, o.fetcher]);
+      }
+    } else if (o.phase === 'fetch' || o.phase === 'walk') {
+      const f = o.fetcher || p;
+      // Red de seguridad: si por lo que sea no llega en un rato, se saca igualmente.
+      if ((o.fetchT += dt) > OUT.giveUp) { this.finishRestart(o); return; }
+      if (o.phase === 'fetch') {
+        // Lo recoge cuando lo tiene a mano (y no va disparado).
+        if (dist(f.x, f.y, ball.x, ball.y) < 0.8 && ball.z < 1.3 && ball.speed < 4) {
+          ball.vx = ball.vy = ball.vz = 0;
+          this.giveBall(f, false);
+          f.carrying = true;
+          o.phase = 'walk';
+        }
+      } else if (f !== p) {
+        // El defensa llega al portero y se lo da.
+        if (dist(f.x, f.y, p.x, p.y) < 1.3) {
+          f.carrying = false; f.hasBall = false;
+          this.giveBall(p, false);
+          p.carrying = true;
+          o.fetcher = p;
+        }
+      } else if (dist(p.x, p.y, o.x, o.y) < 0.3) this.finishRestart(o);
+    }
+  }
+
+  // Ya en el punto: saque de banda con el balón por encima de la cabeza; córner y saque de puerta,
+  // con el balón en el suelo. A partir de aquí, como siempre: hay que golpear (o saca solo).
+  finishRestart(r) {
+    const { kind, team, taker, x, y } = r;
+    const ball = this.ball;
+    if (r.fetcher && r.fetcher !== taker) { r.fetcher.carrying = false; r.fetcher.hasBall = false; }
+    this.outActors = null;
+    taker.place(x, y);
+    taker.carrying = false;
+    taker.throwIn = kind === 'throw';
+    taker.faceTo(kind === 'corner' ? team.oppGoalX - team.dir * 11 : L / 2, CY);
+    ball.dead = false; ball.inCrowd = false;
+    this.giveBall(taker, true);
+    // El balón, ya en su sitio: encima de la cabeza (banda) o en el suelo delante del pie.
+    ball.z = taker.throwIn ? OUT.throwHeight : 0;
+    ball.x = taker.x + taker.fx * (taker.throwIn ? 0.05 : 0.55);
+    ball.y = taker.y + taker.fy * (taker.throwIn ? 0.05 : 0.55);
+    ball.vx = ball.vy = ball.vz = 0;
+    this.out = null;
+    this.state = 'restart';
+    this.restartWait = 0.6;
+    this.restartTaker = taker;
   }
 
   setupRestart(kind, team, x, y) {
@@ -131,6 +263,7 @@ export class Match {
     this.restartTaker = taker;
     const names = { throw: 'Saque de banda', corner: 'Córner', goalkick: 'Saque de puerta' };
     this.show(names[kind], 1.0);
+    this.restartName = names[kind];
     sfx.whistle(0.15);
   }
 
@@ -191,11 +324,13 @@ export class Match {
 
     for (const h of this.humans) h.update(this, dt);
     for (const t of this.teams) t.updateAI(this, dt);
+    if (this.state === 'out') this.outMove();
     for (const p of this.players) p.update(dt);
     this.referee.update(dt, this.ball);
 
     this.dribble(dt);
     const ev = this.ball.update(dt);
+    if (this.state === 'out') this.outProgress(dt);
 
     if (this.state === 'play') {
       this.clock += dt;
@@ -238,13 +373,15 @@ export class Match {
     // El portero no suelta el balón al levantarse de una estirada.
     const holding = p.state === 'dive' || p.state === 'jump' || (p.isGK && p.state === 'getup');
     if (p.state !== 'normal' && !holding) { ball.owner = null; p.hasBall = false; return; }
-    if (p.isGK || p.mustPass) {
-      const off = p.isGK ? 0.35 : 0.55;
+    if (p.isGK || p.mustPass || p.carrying) {
+      // En las manos del portero, en los brazos (llevándolo al saque), encima de la cabeza (saque
+      // de banda) o en el suelo delante del pie (córner, saque de puerta, saque de centro).
+      const off = p.throwIn ? 0.05 : p.carrying ? 0.35 : p.isGK ? 0.35 : 0.55;
       const tx = p.x + p.fx * off, ty = p.y + p.fy * off;
       const k = Math.min(1, dt * 16);
       ball.x += (tx - ball.x) * k;
       ball.y += (ty - ball.y) * k;
-      ball.z = p.isGK && !p.mustPass ? 1.1 + p.z : 0;
+      ball.z = p.throwIn ? OUT.throwHeight : p.carrying ? OUT.carryHeight : p.isGK && !p.mustPass ? 1.1 + p.z : 0;
       ball.vx = p.vx; ball.vy = p.vy; ball.vz = 0;
       ball.spin = 0;
       ball.attached = true;
@@ -373,9 +510,9 @@ export class Match {
       if (p.kickCD > 0) continue;
       const d = dist(p.x, p.y, ball.x, ball.y);
       const gkHands = p.isGK && this.inOwnBox(p);
-      const reach = gkHands ? (p.state === 'dive' ? 1.8 : 1.1) : PLAYER.controlDist;
-      // El portero llega con las manos más arriba si salta.
-      const maxZ = gkHands ? 2.7 + p.z : 0.6;
+      // El portero alcanza según su postura (de pie, estirándose en el aire o ya tumbado).
+      const reach = gkHands ? p.keeperReach.reach : PLAYER.controlDist;
+      const maxZ = gkHands ? p.keeperReach.maxZ : 0.6;
       if (p.state === 'fallen' || p.state === 'slide' || p.state === 'getup') continue;
       const rel = ball.z - p.z;            // altura del balón respecto a los pies
       const airborne = p.state === 'jump';
@@ -414,7 +551,7 @@ export class Match {
         return;
       }
       best.triedKick = ball.kickId;
-      const reach = best.state === 'dive' ? 1.8 : 1.1;
+      const reach = best.keeperReach.reach;
       const stretch = bestD / reach;
       const reachChance = 1 - Math.max(0, stretch - 0.55) * 1.2 * Math.min(1, rel / 22);
       if (Math.random() > reachChance * best.skill) return;
@@ -508,7 +645,7 @@ export class Match {
       const team = last.opponent;
       const x = Math.max(1, Math.min(L - 1, ball.x));
       const y = ball.y < CY ? 0 : W;
-      this.setupRestart('throw', team, x, y);
+      this.beginOut('throw', team, x, y);
       return;
     }
     // Línea de fondo.
@@ -516,9 +653,9 @@ export class Match {
     const defending = this.teams.find(t => t.ownGoalX === gx);
     if (last === defending) {
       const att = defending.opponent;
-      this.setupRestart('corner', att, gx === 0 ? 0.5 : L - 0.5, ball.y < CY ? 0.5 : W - 0.5);
+      this.beginOut('corner', att, gx === 0 ? 0.5 : L - 0.5, ball.y < CY ? 0.5 : W - 0.5);
     } else {
-      this.setupRestart('goalkick', defending, gx + defending.dir * 5.5, CY + (ball.y < CY ? -4 : 4));
+      this.beginOut('goalkick', defending, gx + defending.dir * 5.5, CY + (ball.y < CY ? -4 : 4));
     }
   }
 

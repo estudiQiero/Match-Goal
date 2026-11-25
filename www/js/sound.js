@@ -9,8 +9,17 @@ function ac() {
     if (!C) return null;
     ctx = new C();
   }
-  if (ctx.state === 'suspended') ctx.resume();
+  if (ctx.state !== 'running') ctx.resume().catch(() => {});
   return ctx;
+}
+
+// El navegador solo deja sonar el audio después de una tecla, un clic o un toque, y lo puede
+// suspender en cualquier momento (el Mac se duerme, cambias de pestaña, Safari…). Cada vez que
+// el jugador pulsa algo, se crea o se reanuda el audio, así nunca se queda el juego mudo.
+if (typeof window !== 'undefined' && window.addEventListener) {
+  const wake = () => { if (enabled) ac(); };
+  for (const ev of ['keydown', 'pointerdown', 'touchstart']) window.addEventListener(ev, wake, { capture: true, passive: true });
+  document.addEventListener?.('visibilitychange', () => { if (!document.hidden && ctx && ctx.state !== 'running') ctx.resume().catch(() => {}); });
 }
 
 function noise(dur) {

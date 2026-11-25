@@ -119,8 +119,8 @@ approach(33, 33.4, 'balón al otro lado (0,6 m)');
 function kickWith(script) {
   const { m, h, me, keys } = setup();
   let kicked = null; const k0 = m.ball.kickId;
-  const orig = me.kick.bind(me);
-  me.kick = (ball, dx, dy, power, type, spin) => { kicked = kicked || { power, type, t: m.time }; return orig(ball, dx, dy, power, type, spin); };
+  const orig = h.release.bind(h);
+  h.release = (match, inp, type, power) => { kicked = kicked || { power, type, t: m.time }; return orig(match, inp, type, power); };
   const t0 = m.time;
   run(m, 6, t => script(keys, t, h));
   return kicked && { ...kicked, t: kicked.t - t0 };

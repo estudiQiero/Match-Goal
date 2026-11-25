@@ -5,9 +5,13 @@
 //  sw = cambiar de jugador
 
 const keys = new Set();
+// Teclas pulsadas desde la última vez que el juego las miró. Así una pulsación muy rápida
+// (que empieza y acaba entre dos fotogramas, p. ej. si el navegador va lento) no se pierde.
+const tapped = new Set();
 const isMeta = c => c === 'MetaLeft' || c === 'MetaRight';
 window.addEventListener('keydown', e => {
   keys.add(e.code);
+  if (!e.repeat) tapped.add(e.code);
   const t = e.target && e.target.tagName;
   if (t === 'INPUT' || t === 'SELECT') return;
   if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
@@ -21,7 +25,7 @@ window.addEventListener('keyup', e => {
   // al soltar Cmd se dan todas por soltadas para que ninguna se quede «pegada».
   if (isMeta(e.code)) keys.clear();
 });
-window.addEventListener('blur', () => keys.clear());
+window.addEventListener('blur', () => { keys.clear(); tapped.clear(); });
 
 // ---------- Teclado ----------
 // Teclas de cada jugador, redefinibles desde el menú («Redefinir teclas»). Se guardan en el navegador.
@@ -92,7 +96,15 @@ export function schemeLabel(name) {
   return `${names(m.up)} arriba · ${names(m.down)} abajo · ${names(m.left)} izquierda · ${names(m.right)} derecha · ${names(m.a)} raso · ${names(m.b)} alto · ${names(m.sw || [])} cambiar`;
 }
 
-const held = list => list.some(c => keys.has(c));
+// Pulsada ahora, o pulsada (aunque ya soltada) desde la última vez que se miró.
+const held = list => {
+  let on = false;
+  for (const c of list) {
+    if (keys.has(c)) on = true;
+    if (tapped.delete(c)) on = true;
+  }
+  return on;
+};
 
 function keyboard(name) {
   return () => {

@@ -40,9 +40,17 @@ Estas son las teclas por defecto. En el menú se pueden cambiar con **Redefinir 
 
 Sin balón, **raso** es una entrada solo si tienes cerca un rival disputando el balón; si no, es un pequeño **acelerón** (que cansa más).
 
+**Esprint.** Pulsa dos veces seguidas la misma dirección (soltar y volver a pulsar enseguida) y el jugador esprinta mientras la mantengas: va más rápido pero se cansa mucho antes. Se acaba al soltar o al cambiar de dirección.
+
+**Pausas al salir el balón.** Cuando el balón sale por una banda o por la línea de fondo, el juego se calma unos segundos: el balón sigue rodando hasta pararse, rebota en las vallas si va fuerte y bajo, o se va a la grada si va alto (y el público lo devuelve). El jugador que saca va a por él, lo lleva en brazos hasta el punto del saque y saca: de banda, con las manos desde encima de la cabeza; córner y saque de puerta, con el balón en el suelo.
+
 **Cansancio.** Cada jugador lleva tres puntos encima de la cabeza: verdes si está fresco, luego verde-naranja, naranja, naranja-rojo y rojo. Cuanto más cansado, menos corre (en rojo, apenas). Correr, conducir y los acelerones cansan; parado o andando se recupera, y en el descanso también. El jugador que manejas lo muestra en el aro del suelo, que gira en verde, naranja o rojo. Un jugador normal acaba el partido en naranja; si usas mucho a uno, llegará al rojo.
 
-El botón decide si el golpeo va **raso** o **alto**. Si apuntas a un compañero, el balón va hacia él con la fuerza que hayas puesto; si apuntas a portería, es un chut libre.
+El botón decide si el golpeo va **raso** o **alto**. Si apuntas a un compañero, el balón va hacia él con la fuerza que hayas puesto.
+
+**Chut a puerta.** Cerca del área y con el cuerpo encarando la portería, golpear es chutar: el balón va hacia donde apunta el cuerpo, con ayuda para que entre los tres palos si estás bien orientado (para buscar un palo, orienta el cuerpo hacia él). Fallas más si el cuerpo no mira a portería, si chutas corriendo muy deprisa o desde lejos, si te pasas de fuerza (se va alto) o si pulsas otra dirección en el último momento (fuera o alto). El chut alto busca entrar bajo el larguero; con demasiada fuerza se va por encima. Cerca de la portería hay que decidir rápido: manteniendo el botón, el medidor se llena en 1 s a 30 m y en medio segundo a 10 m o menos (en un pase, 2 s), y el chut sale en cuanto sueltas.
+
+**Línea de trayectoria.** Mientras pulsas el botón de golpeo aparece una línea punteada, con los trazos avanzando, con el camino que seguiría el balón con la fuerza del medidor en ese momento: a ras de césped en el raso, y en arco (con su sombra en el suelo) en el alto. Acaba en una cruz donde se para o cae. Es amarilla en un pase o golpeo normal y **roja si es un chut a puerta**; cuando estás en posición de chutar (cerca y encarando la portería) aparece además un **punto rojo** a la derecha del medidor de encima de la cabeza. Es el golpeo limpio, sin los errores: si el cuerpo no está bien orientado o te pasas de fuerza, el balón real se desviará de la línea. Tras golpear, la línea se queda un instante y se desvanece.
 
 ## Estructura
 

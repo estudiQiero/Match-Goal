@@ -1,4 +1,4 @@
-import { PITCH, PLAYER } from './config.js';
+import { PITCH, PLAYER, WALLS } from './config.js';
 import { WEAR_CELL, WEAR_PAD, WEAR_W, WEAR_H } from './match.js';
 import { drawPixelText, pixelTextWidth } from './pixelfont.js';
 import { playerSprite, kitFor, pickDir, hasAnim, frameCount, SPRITE_H, ANIM_FPS } from './sprites.js';
@@ -74,6 +74,11 @@ const BALL_PATCH_GREYS = ['#b9bbba', '#a5a7a6', '#8f9291', '#7a7d7c'];
 const BALL_PATCHES = [[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]].map(v => v.map(c => c / Math.sqrt(3)));
 const LINE_RGB = [214, 226, 206];
 const MIN_DEPTH = 3;
+// Metros de suelo que se ven por debajo de la banda cercana cuando la jugada está allí
+// (espacio para los banquillos).
+const BENCH_ZONE = 7.5;
+// Y por detrás de la banda lejana, la franja de la grada (el público, más adelante).
+const STAND_ZONE = 10;
 
 // Cámara en perspectiva: elevada, desde la banda cercana, mirando hacia la banda lejana.
 // Las líneas convergen, los jugadores lejanos se ven más pequeños
@@ -137,8 +142,37 @@ export class Renderer {
     if (!Number.isFinite(this.camX)) this.camX = Number.isFinite(b.x) ? b.x : L / 2;
     if (!Number.isFinite(this.camY)) this.camY = Number.isFinite(b.y) ? b.y : CY;
     this.camX = Math.max(4, Math.min(L - 4, this.camX));
-    this.camY = Math.max(14, Math.min(W - 10, this.camY));
+    // Hacia abajo, la cámara puede bajar hasta que se vea la banda cercana y, por debajo, unos metros
+    // más (la zona de los banquillos). Depende del tamaño de la ventana, así que se calcula.
+    const maxY = this.camYToSee(W + BENCH_ZONE, this.h - 4);
+    // Hacia arriba, igual: hasta que se vea la banda lejana y, detrás, la franja de la grada
+    // (el público), justo por debajo del marcador.
+    const top = (this.hudBox?.bottom ?? 60) + 4;
+    const minY = Math.min(maxY, this.camYToSee(-STAND_ZONE, top));
+    this.camY = Math.max(minY, Math.min(maxY, this.camY));
     this.setupCam();
+  }
+
+  // camY con el que el punto del suelo de coordenada y queda a la altura screenY de la pantalla.
+  // (Cuanto más grande camY, más arriba se ve ese punto: se busca por bisección.)
+  camYToSee(y, screenY) {
+    const key = `${y}|${screenY}|${this.w}|${this.h}`;
+    this._camYCache ??= new Map();
+    if (this._camYCache.has(key)) return this._camYCache.get(key);
+    const ct = Math.cos(this.tilt), st = Math.sin(this.tilt);
+    const syAt = camY => {
+      const dy = camY + this.dist * ct - y, dz = this.dist * st;
+      const d = Math.max(0.5, dy * ct + dz * st);
+      return this.cy - (dy * st - dz * ct) * this.focal / d;
+    };
+    let lo = -40, hi = W + 80;
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      if (syAt(mid) > screenY) lo = mid; else hi = mid;
+    }
+    if (this._camYCache.size > 20) this._camYCache.clear();
+    this._camYCache.set(key, lo);
+    return lo;
   }
 
   draw(match, humans) {
@@ -165,12 +199,15 @@ export class Renderer {
       items.push({ y: CY + PITCH.goalWidth / 2 + 0.05, draw: () => this.goalFront(g) });
     }
     for (const p of [...match.players, ref]) if (p.y < near) items.push({ y: p.y, draw: () => this.player(p) });
+    // Vallas publicitarias: cada panel ordenado en profundidad con los jugadores.
+    for (const panel of this.boardPanels()) if (panel.y < near) items.push({ y: panel.y, draw: () => this.boardPanel(panel) });
     if (b.y < near) items.push({ y: b.y + 0.01, draw: () => this.ball(b) });
     // El aro del jugador que manejas va en el suelo, por debajo de todos los dibujos.
     for (const h of humans) if (h.player && h.player.y < near) this.humanGround(h);
     items.sort((a, z) => a.y - z.y);
     for (const it of items) it.draw();
 
+    for (const h of humans) { const line = h.previewLine?.(match); if (line) this.trajectoryLine(line); }
     for (const h of humans) if (h.player && h.player.y < near) this.humanMarker(h);
     this.edgeDots(match);
     this.hud(match, humans);
@@ -395,6 +432,45 @@ export class Renderer {
 
   shadow(x, y, r, alpha) { this.groundEllipse(x, y, r, `rgba(0,0,0,${alpha})`); }
 
+  // ---------- Vallas publicitarias ----------
+
+  // Paneles alrededor del campo, separados de las líneas: [x0, y0, x1, y1] en el suelo, color y texto.
+  boardPanels() {
+    if (this._panels) return this._panels;
+    const out = [], E = WALLS.end, F = WALLS.far, N = WALLS.near, P = 6;
+    const ads = [['#1f3c88', 'MATCH GOAL', '#ffffff'], ['#c23b22', 'FUTBOL', '#ffffff'], ['#f2c230', 'MATCH GOAL', '#18181c'],
+                 ['#18181c', 'GOAL', '#f2c230'], ['#2e8b57', 'MATCH GOAL', '#ffffff']];
+    let n = 0;
+    const add = (x0, y0, x1, y1) => { const [col, text, ink] = ads[n++ % ads.length]; out.push({ x0, y0, x1, y1, col, text, ink, y: (y0 + y1) / 2 }); };
+    for (let x = -E; x < L + E - 0.01; x += P) { add(x, -F, Math.min(x + P, L + E), -F); }            // banda lejana
+    for (let x = -E; x < L + E - 0.01; x += P) { add(x, W + N, Math.min(x + P, L + E), W + N); }      // banda cercana
+    for (const gx of [-E, L + E]) for (let y = -F; y < W + N - 0.01; y += P) add(gx, y, gx, Math.min(y + P, W + N));   // fondos
+    this._panels = out;
+    return out;
+  }
+
+  boardPanel(b) {
+    const c = this.ctx, H = WALLS.height;
+    const a = this.P(b.x0, b.y0, 0), bb = this.P(b.x1, b.y1, 0), ct = this.P(b.x1, b.y1, H), d = this.P(b.x0, b.y0, H);
+    const minX = Math.min(a[0], bb[0]), maxX = Math.max(a[0], bb[0]);
+    if (maxX < -50 || minX > this.w + 50) return;
+    c.beginPath();
+    c.moveTo(snap(a[0]), snap(a[1])); c.lineTo(snap(bb[0]), snap(bb[1]));
+    c.lineTo(snap(ct[0]), snap(ct[1])); c.lineTo(snap(d[0]), snap(d[1]));
+    c.closePath();
+    c.fillStyle = b.col; c.fill();
+    // Borde superior más claro y sombra en el suelo.
+    c.fillStyle = 'rgba(255,255,255,0.25)';
+    c.beginPath(); c.moveTo(snap(d[0]), snap(d[1])); c.lineTo(snap(ct[0]), snap(ct[1]));
+    c.lineTo(snap(ct[0]), snap(ct[1]) + PIXEL); c.lineTo(snap(d[0]), snap(d[1]) + PIXEL); c.closePath(); c.fill();
+    // Texto, si cabe (en los paneles que se ven de frente).
+    const h = Math.abs(((a[1] + bb[1]) - (d[1] + ct[1])) / 2), w = maxX - minX;
+    const px = Math.max(1, Math.floor(h * 0.55 / 7));
+    if (b.text && w > pixelTextWidth(b.text) * px * 1.2 && h > 8) {
+      drawPixelText(c, b.text, (a[0] + bb[0] + ct[0] + d[0]) / 4, (a[1] + bb[1] + ct[1] + d[1]) / 4, px, b.ink, false);
+    }
+  }
+
   // ---------- Porterías ----------
 
   goalPts(gx) {
@@ -598,12 +674,58 @@ export class Renderer {
       }
     }
     pixelEllipseRing(c, x, y, rx, ry, HUMAN_COLORS[h.id]);
+
+  }
+
+  // Línea de trayectoria del golpeo, punteada y en píxeles gordos, con los trazos avanzando hacia
+  // delante. Amarilla en un pase o golpeo normal y roja si es un chut a puerta. En el alto, el arco en el
+  // aire y su sombra en el suelo (así se lee la altura y dónde cae); en el raso, a ras de césped.
+  // Los trazos se miden en metros del campo, así se ven más cortos a lo lejos (perspectiva).
+  trajectoryLine({ pts, type, alpha, shot }) {
+    const c = this.ctx, near = this.nearY;
+    const P = pts.filter(q => q[1] < near);
+    if (P.length < 2) return;
+    const DASH = 0.55, GAP = 0.5, SPEED = 5;              // m de trazo, m de hueco, m/s de avance
+    const period = DASH + GAP;
+    const phase = (performance.now() / 1000 * SPEED) % period;
+    const trace = (ground, color, w) => {
+      c.fillStyle = color;
+      let prev = null, dist = 0;
+      for (const [x, y, z] of P) {
+        const [sx, sy] = this.P(x, y, ground ? 0 : z);
+        if (prev) {
+          const segLen = Math.hypot(x - prev[2], y - prev[3], ground ? 0 : z - prev[4]);
+          const n = Math.max(1, Math.ceil(Math.max(Math.abs(sx - prev[0]), Math.abs(sy - prev[1])) / PIXEL));
+          for (let i = 1; i <= n; i++) {
+            const t = i / n;
+            // ¿Este punto cae en un trazo o en un hueco? (el patrón avanza con el tiempo)
+            const along = dist + segLen * t - phase;
+            if (((along % period) + period) % period > DASH) continue;
+            c.fillRect(snap(prev[0] + (sx - prev[0]) * t), snap(prev[1] + (sy - prev[1]) * t), w * PIXEL, w * PIXEL);
+          }
+          dist += segLen;
+        }
+        prev = [sx, sy, x, y, z];
+      }
+    };
+    const [r, g, b] = shot ? [255, 59, 48] : [255, 210, 63];
+    const col = a => `rgba(${r},${g},${b},${(a * alpha).toFixed(3)})`;
+    const airborne = P.some(q => q[2] > 0.3);
+    if (type === 'loft' || airborne) trace(true, `rgba(0,0,0,${(0.3 * alpha).toFixed(3)})`, 1);   // sombra en el suelo
+    trace(false, col(0.65), 2);
+    // Cruz donde se para o cae.
+    const [ex, ey] = this.P(P[P.length - 1][0], P[P.length - 1][1], 0);
+    c.fillStyle = col(0.65);
+    for (const [dx, dy] of [[0, 0], [-1, -1], [1, 1], [-1, 1], [1, -1], [-2, -2], [2, 2], [-2, 2], [2, -2]]) {
+      c.fillRect(snap(ex) + dx * PIXEL, snap(ey) + dy * PIXEL, PIXEL, PIXEL);
+    }
   }
 
   // Encima de la cabeza del jugador que manejas: el medidor de fuerza.
   humanMarker(h) {
     const c = this.ctx, p = h.player;
     const [x, y] = this.P(p.x, p.y);
+
 
     // Medidor: 8 rayitas verticales que se encienden de izquierda a derecha (flojo → fuerte).
     // En automático va y viene solo; manteniendo el botón lo cargas tú y se subraya en blanco.
@@ -621,6 +743,17 @@ export class Renderer {
     if (m.manual) {
       c.fillStyle = '#ffffff';
       c.fillRect(bx, by + (TH + 1) * PIXEL, w, PIXEL);
+    }
+
+    // En posición de chutar a puerta (cerca y encarando la portería): un punto rojo, como la línea
+    // del chut, a la derecha del medidor. Se apaga en cuanto sale del ángulo o de la distancia de tiro.
+    if (h.canShoot) {
+      const S = 5;                                        // lado en píxeles de dibujo (como el alto del medidor)
+      const dx = bx + w + 2 * PIXEL, dy = by + Math.round((TH - S) / 2) * PIXEL;
+      c.fillStyle = 'rgb(22,62,26)';
+      c.fillRect(dx - PIXEL, dy - PIXEL, (S + 2) * PIXEL, (S + 2) * PIXEL);
+      c.fillStyle = 'rgb(255,59,48)';
+      c.fillRect(dx, dy, S * PIXEL, S * PIXEL);
     }
   }
 
@@ -716,6 +849,15 @@ export class Renderer {
     drawPixelText(c, tac, this.w / 2, y2 + th2 / 2, PIXEL, 'rgba(255,255,255,0.9)', false);
     // Zona que ocupa el marcador: los triángulos de arriba se ponen por debajo (ver edgeDots).
     this.hudBox = { x0: Math.min(x0, this.w / 2 - tw2 / 2), x1: Math.max(x0 + tw, this.w / 2 + tw2 / 2), bottom: y2 + th2 };
+
+    // Te toca sacar: aviso fijo hasta que golpees (si no, parece que el juego se ha parado).
+    const taker = humans.find(h => h.mustTakeRestart);
+    if (taker && match.messageT <= 0 && match.state !== 'goal') {
+      const lines = [match.restartName || 'Saque', 'pulsa raso o alto para sacar'];
+      const px = Math.min(PIXEL * 2, Math.floor(this.w * 0.92 / pixelTextWidth(lines[1])));
+      drawPixelText(c, lines[0], this.w / 2, this.h * 0.3, Math.min(PIXEL * 3, Math.floor(this.w * 0.92 / pixelTextWidth(lines[0]))), '#f4f4ec');
+      drawPixelText(c, lines[1], this.w / 2, this.h * 0.3 + 12 * PIXEL, px, '#ffd23f');
+    }
 
     if (match.messageT > 0) {
       // Mensajes en letras de píxeles gordos, sin contorno. Se encogen si no caben.

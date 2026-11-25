@@ -120,7 +120,7 @@ export class Team {
 
     for (const p of this.players) {
       if (p.human || p.state !== 'normal') continue;
-      if (p === match.restartTaker) { p.mx = p.my = 0; continue; }
+      if (p === match.restartTaker || match.outActors?.has(p)) { p.mx = p.my = 0; continue; }
       if (p.isGK) { this.keeperAI(match, p, dt); continue; }
       if (owner === p) { this.carrierAI(match, p, dt); continue; }
 

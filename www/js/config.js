@@ -15,6 +15,45 @@ export const PITCH = {
   centerRadius: 9.15,
 };
 
+// Alcance de las manos del portero (dentro de su área) según su postura: [distancia, altura] en m.
+// Tumbado tras una estirada solo llega a balones bajos: lo que le pasa por encima, pasa.
+export const KEEPER = {
+  standing: [1.1, 2.5],     // de pie (si salta, la altura sube con el salto)
+  diving: [1.8, 1.7],       // en el aire, durante la primera parte de la estirada
+  lying: [1.2, 0.5],        // ya en el suelo, al final de la estirada
+  diveAir: 0.35,            // segundos de estirada en el aire (luego, tumbado)
+  diveTime: 0.6,
+};
+
+// Alrededor del campo: vallas publicitarias y, detrás, la grada (para el balón fuera de juego).
+export const WALLS = {
+  far: 4.2,             // metros por detrás de la banda lejana
+  near: 5.5,            // por detrás de la banda cercana (la zona de los banquillos)
+  end: 4,               // por detrás de las líneas de fondo
+  height: 1.0,          // altura de las vallas: por encima, el balón las salta
+  stand: 1.6,           // la grada empieza a esta distancia por detrás de la valla
+  bounce: 0.35,         // rebote en la valla
+};
+
+// Pausas cuando el balón sale: se deja rodar, alguien va a por él y lo lleva al punto del saque.
+export const OUT = {
+  settleMin: 1.2,       // segundos mínimos de pausa antes de ir a por el balón
+  settleMax: 3,         // como mucho, aunque aún ruede
+  crowdReturn: 1.5,     // lo que tarda el público en devolver un balón que se fue a la grada
+  giveUp: 10,           // si en este tiempo no ha llegado al balón (o al punto), se saca igualmente
+  fetchSpeed: 0.75,     // a qué ritmo va a por el balón (fracción de su velocidad)
+  carrySpeed: 0.55,     // y a qué ritmo vuelve con él en las manos
+  throwHeight: 2.2,     // saque de banda: el balón por encima de la cabeza
+  carryHeight: 1.0,     // llevándolo en los brazos
+};
+
+// Saque de banda con las manos.
+export const THROW = {
+  min: 5, max: 16,      // velocidad horizontal (m/s) con fuerza 0 y 1
+  vz: 1.5,              // hacia arriba (raso)
+  loftVz: 3.5,          // hacia arriba (alto)
+};
+
 export const BALL = {
   radius: 0.11,
   gravity: 9.81,
@@ -30,7 +69,8 @@ export const PLAYER = {
   radius: 0.4,
   height: 1.8,
   speed: 6.8,
-  sprint: 8.2,
+  sprint: 8.2,           // esprint (doble toque en la misma dirección)
+  sprintDoubleTap: 0.3,  // tiempo máximo entre soltar y volver a pulsar para esprintar
   dribbleSpeed: 0.83,    // con el balón se corre algo más despacio (83 %): obliga a ir a toques
   accel: 22,
   turnRate: 12,          // velocidad de giro (rad/s): media vuelta en ~0,26 s
@@ -70,9 +110,37 @@ export const FATIGUE = {
   drain: 0.020,                       // gasto por minuto de partido corriendo a tope
   ballDrain: 1.3,                     // conducir el balón cansa algo más
   burstDrain: 3,                      // y el acelerón, mucho más
+  sprintDrain: 2,                     // esprintar cansa el doble
   recover: 0.012,                     // recuperación por minuto de partido parado
   walk: 2.2,                          // por debajo de esta velocidad (m/s) ya se recupera algo
   halfTime: 0.15,                     // lo que se recupera en el descanso
+};
+
+// Chut a puerta del jugador que manejas: va hacia donde apunta el CUERPO, con ayuda para que
+// entre los tres palos si está bien orientado. Fallos: cuerpo mal orientado, correr deprisa,
+// pasarse de fuerza (se va alto) o pulsar otra dirección en el último momento (fuera o alto).
+export const SHOT = {
+  range: 30,            // a menos de esto de la portería, golpear encarándola es chutar
+  minPower: 0.12,       // por debajo de esta fuerza es un toque, no un chut
+  // Manteniendo el botón en posición de chut, el medidor se llena mucho más deprisa que en un pase
+  // (2 s), y cuanto más cerca de la portería, más: no hay tiempo delante del portero.
+  fillFar: 1.0,         // segundos en llenarse a la distancia máxima de chut (range)
+  fillNear: 0.5,        // segundos en llenarse a fillNearDist o menos
+  fillNearDist: 10,
+  reach: 1.6,           // en posición de chut golpea el balón hasta a esta distancia (sin esperar a alcanzarlo)
+  facing: 0.6,          // cuánto tiene que mirar el cuerpo a portería (coseno; 1 = de frente)
+  assist: 0.65,         // cuánto lleva la ayuda el tiro hacia dentro de los palos (0 a 1)
+  inside: 0.5,          // la ayuda apunta a esta distancia por dentro de cada palo (m)
+  base: 0.03,           // error de dirección siempre presente (rad)
+  offAngle: 0.35,       // error extra por cada radián que el cuerpo no mira a portería
+  speed: 0.17,          // error extra corriendo a tope
+  distance: 0.004,      // error extra por cada metro de distancia a partir de 12 m
+  late: 0.45,           // error extra por radián entre la dirección pulsada al soltar y el cuerpo
+  lateLift: 6,          // y lo que eso levanta el balón (m/s hacia arriba por radián, al azar)
+  overPower: 0.85,      // por encima de esta fuerza el chut se descontrola…
+  overError: 0.25,      // …en dirección…
+  overLift: 42,         // …y en altura (m/s hacia arriba por cada unidad de fuerza de más, al azar)
+  highHeight: [1.4, 2.2], // chut alto: altura a la que llega a la portería si sale bien (m)
 };
 
 export const KICK = {
@@ -89,7 +157,9 @@ export const KICK = {
   holdTime: 0.2,         // a partir de aquí la pulsación cuenta como «mantener»
   assistMin: 0.13,       // por debajo de esta fuerza no hay ayuda al pase (es un toque)
   touchPower: 0.02,      // toque cortito si te pasas de fuerza y el medidor vuelve a cero
-  queueTime: 0.4,        // si el balón no está al alcance, el golpeo espera hasta esto
+  queueTime: 0.4,
+  autoRestart: 4,        // si te toca sacar y no golpeas en estos segundos, saca el jugador solo
+  trailTime: 0.7,        // la línea de trayectoria se queda esto tras el golpeo, desvaneciéndose        // si el balón no está al alcance, el golpeo espera hasta esto
   headerSpeed: 14,
   volleySpeed: 22,
 };

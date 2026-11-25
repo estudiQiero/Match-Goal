@@ -1,4 +1,4 @@
-import { PLAYER, KICK, PITCH, FATIGUE } from './config.js';
+import { PLAYER, KICK, PITCH, FATIGUE, KEEPER, WALLS } from './config.js';
 
 // Gira el vector (fx, fy) hacia (tx, ty) como mucho maxStep radianes.
 // Por ángulo y no mezclando vectores: al mezclar, una media vuelta exacta (180°) se anula
@@ -100,6 +100,7 @@ export class Player {
       const lv = this.fatigueLevel;
       let max = this.maxSpeed * this.skill * FATIGUE.speed[lv];
       if (this.burstT > 0) max *= PLAYER.burstSpeed;
+      else if (this.sprinting) max *= PLAYER.sprint / PLAYER.speed;
       if (this.hasBall) max *= PLAYER.dribbleSpeed;
       if (this.hasBall && this.mustPass) max = 0;
       const tvx = this.mx * max, tvy = this.my * max;
@@ -117,9 +118,9 @@ export class Player {
 
     this.x += this.vx * dt;
     this.y += this.vy * dt;
-    // Límites (se permite salir un poco del campo).
-    this.x = Math.max(-3, Math.min(PITCH.length + 3, this.x));
-    this.y = Math.max(-3, Math.min(PITCH.width + 3, this.y));
+    // Límites: se puede salir del campo hasta las vallas (p. ej. para ir a por un balón que se ha ido).
+    this.x = Math.max(-WALLS.end + 0.3, Math.min(PITCH.length + WALLS.end - 0.3, this.x));
+    this.y = Math.max(-WALLS.far + 0.3, Math.min(PITCH.width + WALLS.near - 0.3, this.y));
 
     this.anim += Math.hypot(this.vx, this.vy) * dt * 1.6;
   }
@@ -128,6 +129,20 @@ export class Player {
   //  type: 'ground' | 'loft' | 'header' | 'volley'
   //  power: 0..1
   kick(ball, dx, dy, power, type, spin = 0) {
+    const [vx, vy, vz] = this.kickVelocity(dx, dy, power, type);
+    this.throwIn = false; this.carrying = false;
+    const d = Math.hypot(dx, dy) || 1;
+    ball.kick(vx, vy, vz, spin);
+    ball.lastTouch = this;
+    this.hasBall = false;
+    this.mustPass = false;
+    this.kickCD = PLAYER.kickCooldown;
+    this.kickAnim = 0.25;
+    this.fx = dx / d; this.fy = dy / d;
+  }
+
+  // Velocidad con la que sale el balón de un golpeo (sin azar): [vx, vy, vz].
+  kickVelocity(dx, dy, power, type) {
     const d = Math.hypot(dx, dy) || 1;
     dx /= d; dy /= d;
     let v, vz;
@@ -150,17 +165,12 @@ export class Player {
         v = KICK.groundMin + (KICK.groundMax - KICK.groundMin) * Math.pow(power, KICK.curve);
         vz = power > 0.7 ? (power - 0.7) * 10 : 0;   // un chut muy fuerte se levanta
     }
-    ball.kick(dx * v, dy * v, vz, spin);
-    ball.lastTouch = this;
-    this.hasBall = false;
-    this.mustPass = false;
-    this.kickCD = PLAYER.kickCooldown;
-    this.kickAnim = 0.25;
-    this.fx = dx; this.fy = dy;
+    return [dx * v, dy * v, vz];
   }
 
   // Pase con velocidad calculada para llegar al punto (tx, ty).
   passTo(ball, tx, ty, lofted = false) {
+    this.throwIn = false; this.carrying = false;
     const dx = tx - this.x, dy = ty - this.y;
     const d = Math.hypot(dx, dy) || 1;
     if (lofted) {
@@ -195,6 +205,7 @@ export class Player {
       let k = FATIGUE.drain * e * e;
       if (this.hasBall) k *= FATIGUE.ballDrain;
       if (this.burstT > 0) k *= FATIGUE.burstDrain;
+      else if (this.sprinting) k *= FATIGUE.sprintDrain;
       this.stamina -= k * gameMin;
     } else {
       // Parado se recupera del todo; andando, menos.
@@ -236,10 +247,21 @@ export class Player {
   // Altura de la cabeza (lo más alto a lo que llega cabeceando).
   get headZ() { return this.z + PLAYER.height + 0.15; }
 
+  // Alcance de las manos del portero ahora mismo: { reach, maxZ } (metros).
+  get keeperReach() {
+    if (this.state === 'dive') {
+      const inAir = KEEPER.diveTime - this.stateT < KEEPER.diveAir;
+      const [reach, maxZ] = inAir ? KEEPER.diving : KEEPER.lying;
+      return { reach, maxZ };
+    }
+    const [reach, maxZ] = KEEPER.standing;
+    return { reach, maxZ: maxZ + this.z };
+  }
+
   dive(dirY, speed = 6) {
     if (this.state !== 'normal') return;
     this.state = 'dive';
-    this.stateT = 0.6;
+    this.stateT = KEEPER.diveTime;
     this.vx = 0;
     this.vy = dirY * speed;
   }

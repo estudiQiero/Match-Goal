@@ -1,4 +1,4 @@
-import { BALL, PITCH } from './config.js';
+import { BALL, PITCH, WALLS } from './config.js';
 
 const CY = PITCH.width / 2;
 const HALF_GOAL = PITCH.goalWidth / 2;
@@ -16,6 +16,9 @@ export class Ball {
     this.attached = false;  // pegada al jugador: en las manos del portero o esperando un saque
     this.lastTouch = null;  // último jugador que la tocó
     this.inNet = null;      // 'left' | 'right' cuando ha entrado en una portería
+    this.dead = false;      // fuera de juego: rueda libre hasta pararse, rebota en las vallas o vuelve de la grada
+    this.returning = false; // volviendo de la grada por encima de la valla
+    this.inCrowd = false;   // se ha ido a la grada (no se ve hasta que el público lo devuelve)
     this.rot = 0;           // rotación visual
   }
 
@@ -78,6 +81,7 @@ export class Ball {
       this.containNet();
       return null;
     }
+    if (this.dead) { this.walls(); return null; }
 
     // ¿Ha cruzado la línea de fondo?
     const r = BALL.radius;
@@ -87,6 +91,34 @@ export class Ball {
     else if (px <= PITCH.length + r && this.x > PITCH.length + r) event = this.lineEvent('right');
     else if (this.y < -r || this.y > PITCH.width + r) event = { type: 'throw' };
     return event;
+  }
+
+  // Fuera del campo: las vallas publicitarias (bajas) y, un poco detrás, la grada.
+  // Bajo, el balón rebota en la valla. Alto, salta la valla, choca con la grada y vuelve al campo
+  // saltando otra vez la valla (nunca se queda detrás ni se pierde).
+  walls() {
+    const lim = [['x', -WALLS.end, -1], ['x', PITCH.length + WALLS.end, 1], ['y', -WALLS.far, -1], ['y', PITCH.width + WALLS.near, 1]];
+    let behind = false;
+    for (const [axis, at, s] of lim) {
+      const vk = axis === 'x' ? 'vx' : 'vy', ok = axis === 'x' ? 'vy' : 'vx';
+      const past = (this[axis] - at) * s;                   // metros por detrás de la valla
+      if (past <= 0) continue;
+      behind = true;
+      if (this.returning) continue;                         // volviendo de la grada: pasa por encima
+      if (past < 0.4 && this.z <= WALLS.height) {
+        // Rebote en la valla.
+        this[axis] = at;
+        if (this[vk] * s > 0) { this[vk] = -this[vk] * WALLS.bounce; this[ok] *= 0.8; }
+      } else if (past >= WALLS.stand) {
+        // Choca con la grada: vuelve hacia el campo, con un saltito para pasar la valla.
+        this[axis] = at + s * WALLS.stand;
+        this[vk] = -s * Math.max(2.5, Math.abs(this[vk]) * 0.35);
+        this[ok] *= 0.5;
+        this.vz = Math.max(this.vz * 0.3, 4.2);
+        this.returning = true;
+      }
+    }
+    if (!behind) this.returning = false;
   }
 
   lineEvent(side) {
