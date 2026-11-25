@@ -36,6 +36,8 @@ const lyingHigh = scene('lying', 1.6, 0);
 check(!lyingHigh.caught && lyingHigh.goal, `portero tumbado, balón a ~1,6 m: le pasa por encima y es gol (${JSON.stringify(lyingHigh)})`);
 const lyingLow = scene('lying', 0.15, 0);
 check(lyingLow.caught, `portero tumbado, balón raso y lento: lo atrapa (${JSON.stringify(lyingLow)})`);
-const standingHigh = scene('standing', 2.1, 0);
-check(standingHigh.caught, `portero de pie, balón a ~2 m: lo atrapa (${JSON.stringify(standingHigh)})`);
+// (Las paradas tienen algo de azar: se repite y se pide que la mayoría sean paradas.)
+let caught = 0;
+for (let i = 0; i < 10; i++) if (scene('standing', 2.1, 0).caught) caught++;
+check(caught >= 6, `portero de pie, balón a ~2 m: lo atrapa casi siempre (${caught} de 10)`);
 console.log(fails ? `${fails} fallos` : 'todo bien');

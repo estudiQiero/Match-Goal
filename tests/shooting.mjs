@@ -68,4 +68,26 @@ check(late.gol < 45 && late.alto + late.fuera > 50, 'dirección a última hora: 
 check(strong.alto >= 10 && strong.gol < base.gol, 'pasarse de fuerza: a veces se va por encima');
 check(high.gol >= 55, 'chut alto bien medido: suele ir bajo el larguero');
 check(highStrong.alto >= 40, 'chut alto al máximo: casi siempre por encima');
+// Ningún golpeo da valores imposibles, en ninguna posición ni orientación alrededor de la portería
+// (un chut alto casi paralelo a la línea de gol daba una velocidad infinita y colgaba el juego).
+{
+  const h2 = new Human(m.home, { poll: () => ({ x: 0, y: 0, a: false, b: false }) }, 1);
+  h2.setPlayer(me);
+  let bad = 0, n = 0, maxVz = 0;
+  for (let dx = 0; dx <= 30; dx += 1.5) for (let dy = -20; dy <= 20; dy += 2) for (let a = 0; a < 16; a++) {
+    me.place(gx - dir * dx, CY + dy);
+    me.fx = Math.cos(a * Math.PI / 8); me.fy = Math.sin(a * Math.PI / 8);
+    m.ball.reset(me.x, me.y); m.ball.owner = me; me.hasBall = true;
+    for (const type of ['ground', 'loft']) for (const power of [0.15, 0.6, 1]) {
+      for (const inp of [{ x: 0, y: 0 }, { x: me.fx, y: me.fy }, { x: -me.fy, y: me.fx }]) {
+        n++;
+        const k = h2.plan(m, inp, type, power, true);
+        const pts = h2.trajectory(m, type, power, inp) || [];
+        if (![k.vx, k.vy, k.vz].every(Number.isFinite) || !pts.every(q => q.every(Number.isFinite))) bad++;
+        maxVz = Math.max(maxVz, k.vz);
+      }
+    }
+  }
+  check(bad === 0 && maxVz < 25, `${n} golpeos alrededor de la portería: todos con valores normales (subida máxima ${maxVz.toFixed(1)} m/s)`);
+}
 console.log(fails ? `${fails} fallos` : 'todo bien');

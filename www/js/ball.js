@@ -25,6 +25,12 @@ export class Ball {
   get speed() { return Math.hypot(this.vx, this.vy); }
 
   kick(vx, vy, vz, spin = 0) {
+    // Nunca valores imposibles: un número infinito o NaN aquí acababa colgando el dibujo.
+    const ok = v => (Number.isFinite(v) ? v : 0);
+    vx = ok(vx); vy = ok(vy); vz = ok(vz); spin = ok(spin);
+    const h = Math.hypot(vx, vy);
+    if (h > BALL.maxSpeed) { vx *= BALL.maxSpeed / h; vy *= BALL.maxSpeed / h; }
+    vz = Math.max(-BALL.maxSpeed, Math.min(BALL.maxVz, vz));
     this.vx = vx; this.vy = vy; this.vz = vz; this.spin = spin;
     this.kickId = (this.kickId || 0) + 1;
     this.age = 0;

@@ -621,7 +621,8 @@ export class Renderer {
   ball(b) {
     const c = this.ctx;
     const [x, y, k] = this.P(b.x, b.y, b.z);
-    const r = Math.max(2.2, k * 0.16 / PIXEL);            // radio en píxeles gordos (más grande que el real, estilo arcade)
+    if (!Number.isFinite(x + y + k)) return;
+    const r = Math.min(30, Math.max(2.2, k * 0.16 / PIXEL));   // radio en píxeles gordos (más grande que el real, estilo arcade)
     const cx = Math.round(x / PIXEL), cy = Math.round(y / PIXEL - r);
     const n = Math.ceil(r);
     // Dirección en la que rueda, vista en pantalla (se recuerda la última si se para).
@@ -693,9 +694,11 @@ export class Renderer {
       let prev = null, dist = 0;
       for (const [x, y, z] of P) {
         const [sx, sy] = this.P(x, y, ground ? 0 : z);
+        if (!Number.isFinite(sx + sy)) { prev = null; continue; }
         if (prev) {
           const segLen = Math.hypot(x - prev[2], y - prev[3], ground ? 0 : z - prev[4]);
-          const n = Math.max(1, Math.ceil(Math.max(Math.abs(sx - prev[0]), Math.abs(sy - prev[1])) / PIXEL));
+          // Como mucho unos cientos de píxeles por tramo: un punto disparatado no puede colgar el dibujo.
+          const n = Math.min(800, Math.max(1, Math.ceil(Math.max(Math.abs(sx - prev[0]), Math.abs(sy - prev[1])) / PIXEL)));
           for (let i = 1; i <= n; i++) {
             const t = i / n;
             // ¿Este punto cae en un trazo o en un hueco? (el patrón avanza con el tiempo)

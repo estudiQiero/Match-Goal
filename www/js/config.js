@@ -56,6 +56,8 @@ export const THROW = {
 
 export const BALL = {
   radius: 0.11,
+  maxSpeed: 45,          // ningún golpeo pasa de esto (m/s)
+  maxVz: 22,             // ni sube más rápido que esto
   gravity: 9.81,
   groundDecel: 3.2,      // frenado al rodar (m/s²)
   airDrag: 0.12,         // resistencia del aire (proporcional)

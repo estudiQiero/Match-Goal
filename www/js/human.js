@@ -360,8 +360,12 @@ export class Human {
     if (type === 'loft') {
       // Chut alto: busca llegar a la portería bajo el larguero.
       v = KICK.loftMin + (KICK.loftMax - KICK.loftMin) * pc;
-      const D = Math.abs((gx - p.x) / (dx || 1e-6));
-      const t = D / (v * 0.96);
+      // Distancia hasta la portería en la dirección del tiro. Si el tiro va casi paralelo a la
+      // línea de gol, «hasta la línea» sería infinito (y colgaba el juego): se usa la distancia
+      // a la portería, y el tiempo de vuelo se limita a algo razonable.
+      const along = Math.abs(dx) > 0.15 ? Math.abs((gx - p.x) / dx) : Infinity;
+      const D = Math.min(along, Math.hypot(gx - p.x, CY - p.y) + 2, 45);
+      const t = Math.max(0.3, Math.min(2.5, D / (v * 0.96)));
       const [h0, h1] = SHOT.highHeight;
       const h = h0 + R() * (h1 - h0) + (random ? (R() - 0.5) * sigma * 6 : 0);
       vz = (h - ball.z + 0.5 * BALL.gravity * t * t) / t + lift;
@@ -370,7 +374,7 @@ export class Human {
       v = KICK.groundMin + (KICK.groundMax - KICK.groundMin) * pc;
       vz = (power > 0.7 ? (power - 0.7) * 10 : 0) + lift;
     }
-    return { vx: dx * v, vy: dy * v, vz: Math.max(0, vz) };
+    return { vx: dx * v, vy: dy * v, vz: Math.max(0, Math.min(BALL.maxVz, vz)) };
   }
 
   // Compatibilidad: chut a puerta directo (lo usan las pruebas).
