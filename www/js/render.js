@@ -268,14 +268,22 @@ export class Renderer {
     for (let n = 0; n < S.length; n += 9) {
       // Grosor real de la línea (12 cm) en píxeles gordos: 1 o 2.
       const t = Math.max(1, Math.min(2, Math.round(0.12 * S[n + 4] / PIXEL)));
-      let x0 = Math.round(S[n] / PIXEL - t / 2), y0 = Math.round(S[n + 1] / PIXEL - t / 2);
-      const x1 = Math.round(S[n + 2] / PIXEL - t / 2), y1 = Math.round(S[n + 3] / PIXEL - t / 2);
-      if (Math.max(x0, x1) < -t || Math.min(x0, x1) > w || Math.max(y0, y1) < -t || Math.min(y0, y1) > h) continue;
-      const [wx0, wy0, wx1, wy1] = [S[n + 5], S[n + 6], S[n + 7], S[n + 8]];
+      // Se recorta el tramo a la pantalla antes de pintarlo. (Antes se pintaba desde un extremo con
+      // un tope de pasos: con la cámara cerca de la portería, la línea de fondo empieza miles de
+      // píxeles por debajo de la pantalla y el tope se acababa antes de llegar a la parte visible.)
+      const ax = S[n] / PIXEL - t / 2, ay = S[n + 1] / PIXEL - t / 2, bx = S[n + 2] / PIXEL - t / 2, by = S[n + 3] / PIXEL - t / 2;
+      const cl = clipSegment(ax, ay, bx, by, -t - 1, -t - 1, w + 1, h + 1);
+      if (!cl) continue;
+      const [ta, tb] = cl;
+      let x0 = Math.round(ax + (bx - ax) * ta), y0 = Math.round(ay + (by - ay) * ta);
+      const x1 = Math.round(ax + (bx - ax) * tb), y1 = Math.round(ay + (by - ay) * tb);
+      const W0x = S[n + 5], W0y = S[n + 6], W1x = S[n + 7], W1y = S[n + 8];
+      const wx0 = W0x + (W1x - W0x) * ta, wy0 = W0y + (W1y - W0y) * ta;
+      const wx1 = W0x + (W1x - W0x) * tb, wy1 = W0y + (W1y - W0y) * tb;
       const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
       const steps = Math.max(1, Math.max(dx, -dy));
       let err = dx + dy;
-      for (let k = 0; k < 4000; k++) {
+      for (let k = 0; k <= steps + 1; k++) {
         const f = Math.min(1, k / steps), wx = wx0 + (wx1 - wx0) * f, wy = wy0 + (wy1 - wy0) * f;
         plot(x0, y0, t, lineStrength(wx, wy, this.wearAt(wx, wy)));
         if (x0 === x1 && y0 === y1) break;
@@ -831,8 +839,8 @@ export class Renderer {
       c.globalAlpha = 1 - fade;
       // Dirección en pantalla hacia la que mira (la profundidad se ve acortada por la inclinación).
       const dx = p.fx, dy = p.fy * this.st;
-      if (p.human) pixelTriangle(c, x, y, n, dx, dy, HUMAN_COLORS[p.human.id] || '#ffd23f', 2);
-      pixelTriangle(c, x, y, n, dx, dy, 'rgb(22,62,26)', 1);
+      // Sin marco: solo el color de la camiseta (y, si es el jugador que manejas, su aro de color).
+      if (p.human) pixelTriangle(c, x, y, n, dx, dy, HUMAN_COLORS[p.human.id] || '#ffd23f', 1);
       pixelTriangle(c, x, y, n, dx, dy, p.team.color.shirt, 0);
     }
     c.globalAlpha = 1;
@@ -933,4 +941,19 @@ function pixelTriangle(c, x, y, n, dx, dy, color, grow) {
       c.fillRect(x + i * PIXEL, y + j * PIXEL, PIXEL, PIXEL);
     }
   }
+}
+
+// Recorta el segmento (ax, ay)-(bx, by) al rectángulo [x0, x1] × [y0, y1] (Liang-Barsky).
+// Devuelve [t0, t1] (0..1 sobre el segmento) o null si queda fuera.
+function clipSegment(ax, ay, bx, by, x0, y0, x1, y1) {
+  if (![ax, ay, bx, by].every(Number.isFinite)) return null;
+  let t0 = 0, t1 = 1;
+  const dx = bx - ax, dy = by - ay;
+  for (const [p, q] of [[-dx, ax - x0], [dx, x1 - ax], [-dy, ay - y0], [dy, y1 - ay]]) {
+    if (p === 0) { if (q < 0) return null; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; }
+    else { if (r < t0) return null; if (r < t1) t1 = r; }
+  }
+  return [t0, t1];
 }

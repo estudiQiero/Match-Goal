@@ -37,12 +37,12 @@ export const WALLS = {
 
 // Pausas cuando el balón sale: se deja rodar, alguien va a por él y lo lleva al punto del saque.
 export const OUT = {
-  settleMin: 1.2,       // segundos mínimos de pausa antes de ir a por el balón
-  settleMax: 3,         // como mucho, aunque aún ruede
+  settleMin: 0.8,       // segundos mínimos de pausa antes de ir a por el balón
+  settleMax: 2.2,       // como mucho, aunque aún ruede
   crowdReturn: 1.5,     // lo que tarda el público en devolver un balón que se fue a la grada
   giveUp: 10,           // si en este tiempo no ha llegado al balón (o al punto), se saca igualmente
-  fetchSpeed: 0.75,     // a qué ritmo va a por el balón (fracción de su velocidad)
-  carrySpeed: 0.55,     // y a qué ritmo vuelve con él en las manos
+  fetchSpeed: 1,        // a qué ritmo va a por el balón (fracción de su velocidad): corriendo
+  carrySpeed: 0.95,     // y a qué ritmo vuelve con él en las manos: también corriendo
   throwHeight: 2.2,     // saque de banda: el balón por encima de la cabeza
   carryHeight: 1.0,     // llevándolo en los brazos
 };

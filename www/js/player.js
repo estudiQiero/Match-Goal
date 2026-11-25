@@ -101,7 +101,7 @@ export class Player {
       let max = this.maxSpeed * this.skill * FATIGUE.speed[lv];
       if (this.burstT > 0) max *= PLAYER.burstSpeed;
       else if (this.sprinting) max *= PLAYER.sprint / PLAYER.speed;
-      if (this.hasBall) max *= PLAYER.dribbleSpeed;
+      if (this.hasBall && !this.carrying) max *= PLAYER.dribbleSpeed;
       if (this.hasBall && this.mustPass) max = 0;
       const tvx = this.mx * max, tvy = this.my * max;
       const dvx = tvx - this.vx, dvy = tvy - this.vy;
