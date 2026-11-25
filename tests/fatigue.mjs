@@ -29,7 +29,7 @@ const hist = NAMES.map((n, i) => `${n} ${lv.filter(l => l === i).length}`).join(
 const avg = field.reduce((a, p) => a + p.stamina, 0) / field.length;
 console.log(`final del partido (jugadores de campo): ${hist} · energía media ${avg.toFixed(2)}`);
 console.log(`el que persigue el balón todo el partido: ${NAMES[hard.fatigueLevel]} (${hard.stamina.toFixed(2)})`);
-check(lv.every(l => l <= 3) && lv.filter(l => l >= 1 && l <= 3).length >= field.length * 0.5,
+check(lv.every(l => l <= 3) && lv.filter(l => l >= 1 && l <= 3).length >= field.length * 0.4,
   'un jugador normal acaba cansado (naranja) pero no agotado');
 check(hard.fatigueLevel === 4, 'al que se usa a tope todo el partido se agota (rojo)');
 

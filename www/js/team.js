@@ -4,6 +4,7 @@ import { Player } from './player.js';
 
 const L = PITCH.length, W = PITCH.width, CY = W / 2;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const MARK_ZONE = 14;     // un jugador marca a un rival que esté a menos de esto de su sitio en el esquema
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
 
 export class Team {
@@ -45,8 +46,9 @@ export class Team {
   homePos(p, ball, inPossession, kickoff = false) {
     const s = p.slot;
     if (kickoff) {
-      const d = Math.min(0.46, 0.04 + s.d * 0.5);
-      return { x: this.xFromProgress(d), y: this.yFromWidth(s.w) };
+      // Saque de centro: cada uno en su sitio del esquema, pero más cerca del centro del campo.
+      const d = Math.min(0.44, 0.2 + s.d * 0.3);
+      return { x: this.xFromProgress(d), y: this.yFromWidth(0.5 + (s.w - 0.5) * 0.9) };
     }
     // La forma del equipo sigue la ZONA del balón (con algo de retraso), no cada pase:
     // así nadie corre de un lado a otro con cada balón largo.
@@ -54,17 +56,21 @@ export class Team {
     const pb = this.progress(zone.x), pbReal = this.progress(ball.x), push = this.tactic.push;
     // Cada línea sigue al balón a su manera: la defensa se mueve poco, el medio campo más.
     const shift = p.role === 'DF' ? 0.3 : p.role === 'FW' ? 0.4 : 0.45;
-    let d = 0.05 + s.d * 0.5 + 0.225 + (pb - 0.5) * shift + push + (inPossession ? 0.05 : -0.03);
+    // Con el balón el equipo se estira (más distancia entre líneas); sin él, se junta algo, sin apelotonarse.
+    const len = inPossession ? 0.62 : 0.47;
+    let d = 0.5 + (s.d - 0.45) * len + (pb - 0.5) * shift + push + (inPossession ? 0.05 : -0.03);
     // Atacando, la defensa se queda en su campo.
     if (inPossession && p.role === 'DF') d = Math.min(d, 0.47 + push);
-    // Defendiendo, nadie se queda por delante del balón: la línea se repliega por detrás de él…
-    if (!inPossession) d = Math.min(d, pbReal - (2 + s.d * 6) / L);
-    // …salvo los delanteros, que esperan cerca del medio campo para salir a la contra.
+    // Defendiendo, la defensa se queda por detrás del balón y el medio campo, como mucho, a su altura…
+    if (!inPossession && p.role === 'DF') d = Math.min(d, pbReal - 0.03);
+    if (!inPossession && p.role === 'MF') d = Math.min(d, pbReal + 0.04);
+    // …y los delanteros esperan cerca del medio campo para salir a la contra.
     if (!inPossession && p.role === 'FW') d = Math.max(d, 0.4 + push * 0.5);
     d = clamp(d, 0.05, 0.93);
-    const spread = inPossession ? 1.05 : 0.8;
-    let y = this.yFromWidth(0.5 + (s.w - 0.5) * spread);
-    y += (zone.y - y) * (inPossession ? 0.15 : 0.3);
+    // A lo ancho: con el balón se abren hasta las bandas (dan opciones de pase); sin él, se cierran algo.
+    const spread = inPossession ? 1.3 : 0.85;
+    let y = this.yFromWidth(clamp(0.5 + (s.w - 0.5) * spread, 0.05, 0.95));
+    y += (zone.y - y) * (inPossession ? 0.08 : 0.18);
     return { x: this.xFromProgress(d), y: clamp(y, 2, W - 2) };
   }
 
@@ -107,6 +113,32 @@ export class Team {
       }
     }
     const firstChaser = byDist.find(p => chasers.has(p));
+    const opp = this.opponent;
+    const offLine = this.offsideLine(ball);
+
+    // Apoyo al compañero que lleva el balón (uno solo, el más cercano que no esté ya en una tarea).
+    let support = null;
+    if (!restart && owner && owner.team === this && !owner.isGK) {
+      support = this.nearestTo(owner.x, owner.y, p => p !== owner && !p.isGK && !p.human && !chasers.has(p) && p.state === 'normal');
+    }
+    // Marcajes: sin el balón, cada defensa y centrocampista coge al rival libre más cercano a su
+    // posición en el esquema (si está en su zona). El que lleva el balón ya lo presiona otro.
+    const marks = new Map();
+    if (!restart && !inPossession) {
+      const taken = new Set(owner ? [owner] : []);
+      const markers = this.players.filter(p => !p.isGK && p.role !== 'FW' && !chasers.has(p) && !p.human)
+        .sort((a, b) => (a.role === 'DF' ? 0 : 1) - (b.role === 'DF' ? 0 : 1));
+      for (const p of markers) {
+        const home = this.homePos(p, ball, false);
+        let best = null, bd = MARK_ZONE;
+        for (const o of opp.players) {
+          if (o.isGK || taken.has(o)) continue;
+          const d = dist(o.x, o.y, home.x, home.y);
+          if (d < bd) { bd = d; best = o; }
+        }
+        if (best) { marks.set(p, best); taken.add(best); }
+      }
+    }
 
     // Saque de centro: todos esperan quietos; tras el silbato, solo quien saca juega el balón.
     if (match.state === 'kickoff') {
@@ -149,6 +181,24 @@ export class Team {
       if (inPossession && p.role === 'FW' && owner) {
         home.x += this.dir * 4 * Math.sin(match.time * 0.7 + p.index);
       }
+      // Apoyo: el compañero más cercano al que lleva el balón se le ofrece para un pase corto.
+      if (p === support) {
+        const sp = this.supportSpot(owner, opp);
+        home.x = sp.x; home.y = sp.y;
+      }
+      // Marcaje por zonas: sin el balón, cada uno vigila al rival que entra en su zona,
+      // colocándose entre él y la portería, sin abandonar del todo su sitio en el esquema.
+      const mk = marks.get(p);
+      if (mk) {
+        const gx = this.ownGoalX, gl = dist(mk.x, mk.y, gx, CY) || 1;
+        const side = Math.min(2.8, gl * 0.5);
+        const tx = mk.x + (gx - mk.x) / gl * side, ty = mk.y + (CY - mk.y) / gl * side;
+        home.x += (tx - home.x) * 0.7; home.y += (ty - home.y) * 0.7;
+      }
+      // Fuera de juego: en campo rival no se adelanta más allá del penúltimo defensor (o del balón).
+      if (p.role !== 'GK' && this.progress(home.x) > 0.5 && this.progress(home.x) > offLine - 1 / L) {
+        home.x = this.xFromProgress(Math.max(0.5, offLine - 1 / L));
+      }
       // Sin prisa, anda: corre solo si se ha quedado descolocado o la jugada está cerca.
       const dHome = dist(p.x, p.y, home.x, home.y), dBall = dist(p.x, p.y, ball.x, ball.y);
       let urgency = 0.3 + 0.55 * clamp((dHome - 4) / 6, 0, 1);
@@ -164,6 +214,21 @@ export class Team {
       p.resting = p.moveTo(home.x, home.y, urgency, dBall > 20 ? 3 : 1.5) < (dBall > 20 ? 3 : 1.5);
       if (Math.hypot(p.mx, p.my) < 0.05) p.faceTo(ball.x, ball.y);
     }
+  }
+
+  // Dónde ofrecerse para un pase corto al que lleva el balón: en diagonal hacia delante, a unos
+  // 9 m, por el lado con menos rivales.
+  supportSpot(owner, opp) {
+    const fwd = this.dir;
+    let best = null, bestScore = -Infinity;
+    for (const side of [-1, 1]) {
+      const x = clamp(owner.x + fwd * 6, 3, L - 3), y = clamp(owner.y + side * 7, 3, W - 3);
+      let free = 99;
+      for (const o of opp.players) free = Math.min(free, dist(o.x, o.y, x, y));
+      const score = free - Math.abs(y - CY) * 0.05;
+      if (score > bestScore) { bestScore = score; best = { x, y }; }
+    }
+    return best;
   }
 
   carrierAI(match, p, dt) {
@@ -247,13 +312,23 @@ export class Team {
     match.onKick(p, 'shot');
   }
 
+  // Línea del fuera de juego para este equipo: el penúltimo rival (normalmente el último defensa)
+  // o el balón, si está más adelantado. En progreso 0..1 hacia la portería rival.
+  offsideLine(ball) {
+    const deep = this.opponent.players.map(q => this.progress(q.x)).sort((a, b) => b - a);
+    return Math.max(this.progress(ball.x), deep[1] ?? 1);
+  }
+
   bestPass(match, p, pressure) {
     const opp = this.opponent;
     const style = this.passStyle;
     const myProg = this.progress(p.x);
+    const offLine = this.offsideLine(match.ball);
     let best = null;
     for (const t of this.players) {
       if (t === p || t.state !== 'normal') continue;
+      // No se la pasa a un compañero en fuera de juego (salvo en un saque de banda, córner o puerta).
+      if (!p.restartKick && this.progress(t.x) > 0.5 && this.progress(t.x) > offLine + 0.3 / L) continue;
       if (t.isGK && pressure > 2 && myProg > 0.2) continue;
       const lead = 0.6;
       const tx = clamp(t.x + t.vx * lead, 1, L - 1);

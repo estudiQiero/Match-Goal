@@ -186,7 +186,7 @@ export class Renderer {
     const b = match.ball;
     // Sombras: se pintan en la capa de píxeles del campo (ver pixelShadows).
     const shadows = [];
-    for (const p of [...match.players, ref]) if (p.y < near) shadows.push([p.x, p.y, 0.42 * (1 - (p.z || 0) * 0.2), 0.30 - (p.z || 0) * 0.08]);
+    for (const p of [...match.players, ref, ...(match.linesmen || [])]) if (p.y < near) shadows.push([p.x, p.y, 0.42 * (1 - (p.z || 0) * 0.2), 0.30 - (p.z || 0) * 0.08]);
     // La del balón se hace más pequeña y tenue cuanto más alto va (a 4–5 m, menos de la mitad).
     if (b.y < near) shadows.push([b.x, b.y, 0.22 * Math.max(0.45, 1 - b.z * 0.12), Math.max(0.1, 0.30 - b.z * 0.04)]);
     this.wearMap = match.wear;
@@ -198,7 +198,7 @@ export class Renderer {
       items.push({ y: CY - PITCH.goalWidth / 2 - 0.05, draw: () => this.goalBack(g) });
       items.push({ y: CY + PITCH.goalWidth / 2 + 0.05, draw: () => this.goalFront(g) });
     }
-    for (const p of [...match.players, ref]) if (p.y < near) items.push({ y: p.y, draw: () => this.player(p) });
+    for (const p of [...match.players, ref, ...(match.linesmen || [])]) if (p.y < near) items.push({ y: p.y, draw: () => this.player(p) });
     // Vallas publicitarias: cada panel ordenado en profundidad con los jugadores.
     for (const panel of this.boardPanels()) if (panel.y < near) items.push({ y: panel.y, draw: () => this.boardPanel(panel) });
     if (b.y < near) items.push({ y: b.y + 0.01, draw: () => this.ball(b) });
@@ -603,6 +603,19 @@ export class Renderer {
     c.drawImage(spr.canvas, -spr.ax * PIXEL, -spr.ay * PIXEL, spr.canvas.width * PIXEL, spr.canvas.height * PIXEL);
     c.restore();
 
+    // Linier con el banderín en alto (fuera de juego): un mástil y una bandera de cuadros, por
+    // encima de la cabeza, hacia el lado del campo.
+    if (p.flagT > 0) {
+      const fx0 = snap(x + (x < this.w / 2 ? 7 : -7) * PIXEL), top = snap(y - lift - (SPRITE_H + 2) * PIXEL);
+      c.fillStyle = '#d9d9d9';
+      c.fillRect(fx0, top, PIXEL, 16 * PIXEL);
+      const dir = x < this.w / 2 ? 1 : -1;
+      for (let j = 0; j < 6; j++) for (let i = 0; i < 8; i++) {
+        c.fillStyle = (i >> 1) + (j >> 1) & 1 ? '#ffd23f' : '#e8432e';
+        c.fillRect(fx0 + dir * (i + 1) * PIXEL, top + j * PIXEL, PIXEL, PIXEL);
+      }
+    }
+
     // Cansancio: tres puntos encima de la cabeza (el jugador que manejas lo lleva en el aro del suelo).
     if (p.stamina !== undefined && !p.human && p.state !== 'slide' && p.state !== 'fallen' && p.state !== 'dive') {
       const dots = FATIGUE_DOTS[p.fatigueLevel];
@@ -771,8 +784,9 @@ export class Renderer {
   edgeDots(match) {
     const c = this.ctx;
     const APPROACH = 25;                          // metros fuera de pantalla a los que el triángulo empieza a acercarse
-    const MIN_N = 6, MAX_N = 11;                  // tamaño en píxeles de dibujo: lejos / a punto de entrar
-    const EDGE = 4 * PIXEL, INSET = 24 * PIXEL;   // separación del borde: lejos / a punto de entrar
+    const MIN_N = 6, MAX_N = 14;                  // tamaño en píxeles de dibujo: lejos / a punto de entrar
+    const EDGE = 4 * PIXEL, INSET = 34 * PIXEL;   // separación del borde: lejos / a punto de entrar (hacia tu jugador)
+    const GROW = 0.7;                             // curva: < 1 hace crecer antes a las de distancia media
     const dots = [];
     for (const p of match.players) {
       const [sx, sy, k] = this.P(p.x, Math.min(p.y, this.nearY), PLAYER.height / 2);
@@ -794,9 +808,10 @@ export class Renderer {
     dots.sort((a, z) => a.t - z.t);               // los cercanos (grandes) encima
     const hud = this.hudBox;
     for (const { p, side, sx, sy, t, fade } of dots) {
-      const n = Math.round(MIN_N + (MAX_N - MIN_N) * t);
+      const g = Math.pow(t, GROW);
+      const n = Math.round(MIN_N + (MAX_N - MIN_N) * g);
       const size = n * PIXEL, r = size / 2;
-      const inset = EDGE + (INSET - EDGE) * t;
+      const inset = EDGE + (INSET - EDGE) * g;
       const clampX = v => Math.max(EDGE + r, Math.min(this.w - EDGE - r, v));
       const clampY = v => Math.max(EDGE + r, Math.min(this.h - EDGE - r, v));
       // Centro junto al borde.

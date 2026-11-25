@@ -44,12 +44,16 @@ export class Referee {
   }
 
   update(dt, ball) {
-    const [tx, ty] = this.target(ball);
+    // goTo: cuando tiene una tarea (ir a por el balón tras un fuera de juego, plantarlo en su sitio).
+    const [tx, ty] = this.goTo ? [this.goTo.x, this.goTo.y] : this.target(ball);
     const dx = tx - this.x, dy = ty - this.y, d = Math.hypot(dx, dy);
-    if (!this.moving && d > START) this.moving = true;
-    if (this.moving && d < ARRIVE) this.moving = false;
+    if (this.goTo) this.moving = d > 0.25;
+    else {
+      if (!this.moving && d > START) this.moving = true;
+      if (this.moving && d < ARRIVE) this.moving = false;
+    }
 
-    const want = this.moving ? (d > 14 ? JOG : WALK) : 0;
+    const want = this.moving ? (this.goTo ? Math.min(JOG, d * 3) : d > 14 ? JOG : WALK) : 0;
     const wx = d ? dx / d * want : 0, wy = d ? dy / d * want : 0;
     const k = Math.min(1, ACCEL * dt / Math.max(0.01, Math.hypot(wx - this.vx, wy - this.vy)));
     this.vx += (wx - this.vx) * k; this.vy += (wy - this.vy) * k;
@@ -66,3 +70,49 @@ export class Referee {
     this.anim += sp * dt * 1.6;
   }
 }
+
+// Linieres: uno en cada banda, cada uno en una mitad del campo. Corren por la banda siguiendo
+// el balón (sin pasar del medio campo) y levantan el banderín cuando hay fuera de juego.
+export class Linesman {
+  // side: -1 banda lejana (arriba), 1 banda cercana (abajo). half: 0 mitad izquierda, 1 derecha.
+  constructor(side, half, index) {
+    this.side = side; this.half = half;
+    this.y = side < 0 ? -LINE_OFF : W + LINE_OFF;
+    this.x = half ? L * 0.75 : L * 0.25;
+    this.vx = 0; this.vy = 0;
+    this.fx = 0; this.fy = -side;            // mirando al campo
+    this.anim = 0;
+    this.state = 'normal';
+    this.kit = REF_KIT;                      // mismo uniforme que el árbitro
+    this.index = index;
+    this.flagT = 0;                          // > 0: banderín levantado (fuera de juego)
+  }
+
+  place(x) { this.x = x; this.vx = 0; }
+
+  // Cubre su mitad: sigue al balón por la banda, sin pasar del medio campo.
+  update(dt, ball) {
+    if (this.flagT > 0) {                    // con el banderín en alto, quieto
+      this.flagT -= dt;
+      this.vx *= Math.exp(-10 * dt);
+    } else {
+      const lo = this.half ? L / 2 : 2, hi = this.half ? L - 2 : L / 2;
+      const tx = Math.max(lo, Math.min(hi, ball.x));
+      const dx = tx - this.x;
+      // Trota si la jugada se le aleja; si va casi alineado, anda.
+      const want = Math.abs(dx) < 0.8 ? 0 : Math.sign(dx) * Math.min(LINE_SPEED, Math.abs(dx) * 1.5);
+      const k = Math.min(1, 8 * dt);
+      this.vx += (want - this.vx) * k;
+    }
+    this.x += this.vx * dt;
+    // Mira hacia donde corre; parado, al campo.
+    const sp = Math.abs(this.vx);
+    const [tfx, tfy] = sp > 0.6 ? [Math.sign(this.vx), 0] : [0, -this.side];
+    [this.fx, this.fy] = turnToward(this.fx, this.fy, tfx, tfy, 6 * dt);
+    this.anim += sp * dt * 1.6;
+  }
+}
+
+const LINE_OFF = 1.2;        // metros por fuera de la banda
+const LINE_SPEED = 6;        // m/s como mucho (corriendo la banda)
+

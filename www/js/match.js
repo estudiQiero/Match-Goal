@@ -2,10 +2,12 @@ import { PITCH, PLAYER, BALL, FATIGUE, OUT, WALLS } from './config.js';
 import { Ball } from './ball.js';
 import { Team } from './team.js';
 import { sfx } from './sound.js';
-import { Referee } from './referee.js';
+import { Referee, Linesman } from './referee.js';
 
 const L = PITCH.length, W = PITCH.width, CY = W / 2;
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const OFFSIDE_TOL = 0.3;   // margen (m): «en línea» no es fuera de juego
+const OFFSIDE_FLAG = 3;    // segundos con el banderín en alto
 
 // Mapa de pisadas: celdas de WEAR_CELL m desde (-WEAR_PAD, -WEAR_PAD).
 export const WEAR_CELL = 0.5, WEAR_PAD = 2;
@@ -31,6 +33,9 @@ export class Match {
       keep(this.away, [2, 3, 1].slice(0, this.training.rivals));        // defensas centrales primero
     }
     this.referee = new Referee();
+    // Linieres: uno arriba (mitad derecha) y otro abajo (mitad izquierda).
+    this.linesmen = [new Linesman(-1, 1, 5), new Linesman(1, 0, 6)];
+    this.offside = null;     // pase en curso con compañeros en fuera de juego: { team, kicker, flagged, last }
     // Desgaste del césped y la cal: celdas de medio metro (con margen fuera del campo).
     // Empieza a cero y crece donde los jugadores pisan corriendo.
     this.wear = new Float32Array(WEAR_W * WEAR_H);
@@ -102,6 +107,62 @@ export class Match {
     this.restartName = 'Saque inicial';
   }
 
+  // ---------- Fuera de juego ----------
+
+  // En cada golpeo: se apuntan los compañeros que están en fuera de juego en ese instante (campo
+  // rival, por delante del balón y del penúltimo defensor). Si uno de ellos es el siguiente en tocar
+  // el balón, es fuera de juego. Saques de banda, de esquina y de puerta no cuentan.
+  offsideOnKick(p) {
+    const o = this.offside;
+    // Golpea (de cabeza, de volea…) uno que estaba en fuera de juego del pase anterior.
+    if (o && p !== o.kicker && o.team === p.team && o.flagged.has(p)) { this.callOffside(p, o.flagged.get(p)); return; }
+    this.offside = null;
+    if (p.restartKick) { p.restartKick = false; return; }
+    const team = p.team, opp = team.opponent;
+    const ballProg = team.progress(this.ball.x);
+    const deep = opp.players.map(q => team.progress(q.x)).sort((a, b) => b - a);
+    const line = Math.max(ballProg, deep[1] ?? 1);          // el penúltimo defensor (o el balón)
+    const flagged = new Map();
+    for (const q of team.players) {
+      if (q === p || q.isGK) continue;
+      const pr = team.progress(q.x);
+      if (pr > 0.5 && pr > line + OFFSIDE_TOL / L) flagged.set(q, { x: q.x, y: q.y });
+    }
+    if (flagged.size) this.offside = { team, kicker: p, flagged, last: p };
+  }
+
+  // Tras cada paso de juego: ¿quién ha tocado el balón ahora?
+  checkOffside() {
+    const o = this.offside, lt = this.ball.lastTouch;
+    if (!o || !lt || lt === o.last) return;
+    o.last = lt;
+    if (lt.team === o.team && o.flagged.has(lt)) this.callOffside(lt, o.flagged.get(lt));
+    else if (lt !== o.kicker) this.offside = null;        // lo ha tocado otro: el pase ya no cuenta
+  }
+
+  // Fuera de juego: el linier de esa mitad levanta el banderín, el árbitro pita y se para el juego.
+  // Falta para el rival desde donde estaba el jugador en fuera de juego.
+  callOffside(p, pos) {
+    this.offside = null;
+    const team = p.team.opponent;
+    const x = Math.max(1, Math.min(L - 1, pos.x)), y = Math.max(1, Math.min(W - 1, pos.y));
+    const lm = this.linesmen.find(l => (x >= L / 2) === (l.half === 1));
+    if (lm) lm.flagT = OFFSIDE_FLAG;
+    const ball = this.ball;
+    if (ball.owner) ball.owner.hasBall = false;
+    ball.owner = null;
+    ball.dead = true;
+    for (const q of this.players) { q.mustPass = false; q.carrying = false; q.throwIn = false; }
+    this.out = { kind: 'freekick', team, taker: null, fetcher: null, x, y, phase: 'settle', t: 0, crowdT: 0, fetchT: 0 };
+    this.outActors = new Set();
+    this.state = 'out';
+    this.restartTaker = null;
+    this.restartWait = 99;
+    this.show('Fuera de juego', 2);
+    this.restartName = 'Falta';
+    sfx.whistle(0.6);
+  }
+
   // Quién saca y desde dónde (con los casos del entrenamiento sin jugadores de campo).
   chooseRestart(kind, team, x, y) {
     let taker;
@@ -139,6 +200,10 @@ export class Match {
   outMove() {
     const o = this.out, ball = this.ball;
     if (!o) return;
+    if (o.kind === 'freekick') {
+      if (o.phase === 'fetch' && o.taker?.state === 'normal') o.taker.moveTo(ball.x - (o.team.dir * 0.5), ball.y, OUT.fetchSpeed, 0.05);
+      return;
+    }
     const f = o.fetcher || o.taker, p = o.taker;
     // En un saque de puerta que recoge un defensa, el portero espera en el punto del saque.
     if (f !== p && p.state === 'normal') p.moveTo(o.x, o.y, OUT.carrySpeed, 0.05);
@@ -170,6 +235,7 @@ export class Match {
   outProgress(dt) {
     const o = this.out, p = o.taker, ball = this.ball;
     o.t += dt;
+    if (o.kind === 'freekick') return this.freekickProgress(dt);
     if (o.phase === 'settle') {
       if (ball.inCrowd) {
         // El público lo devuelve: aparece fuera, junto al punto del saque.
@@ -209,6 +275,52 @@ export class Match {
     }
   }
 
+  // Tras un fuera de juego: pausa, el árbitro va a por el balón, lo lleva en las manos y lo planta
+  // donde estaba el jugador en fuera de juego; luego el jugador más cercano del equipo que saca va al
+  // balón y saca la falta con el pie.
+  freekickProgress(dt) {
+    const o = this.out, ball = this.ball, ref = this.referee;
+    if (o.t > OUT.giveUp * 2.5) { this.placeFreekickBall(); o.taker ??= this.freekickTaker(); ref.goTo = null; return this.finishRestart(o); }
+    if (o.phase === 'settle') {
+      if ((o.t > OUT.settleMin && ball.speed < 1 && ball.z < 0.05) || o.t > OUT.settleMax) o.phase = 'ref';
+    } else if (o.phase === 'ref') {
+      ref.goTo = { x: ball.x, y: ball.y };
+      if (dist(ref.x, ref.y, ball.x, ball.y) < 0.8) {
+        ball.held = ref;
+        ref.goTo = { x: o.x, y: o.y };
+        o.phase = 'refwalk';
+      }
+    } else if (o.phase === 'refwalk') {
+      if (dist(ref.x, ref.y, o.x, o.y) < 0.4) {
+        this.placeFreekickBall();
+        ref.goTo = { x: o.x + (L / 2 - o.x) * 0.15, y: o.y + (o.y < CY ? 6 : -6) };   // se aparta un poco
+        o.taker = this.freekickTaker();
+        o.fetcher = o.taker;
+        this.restartTaker = o.taker;
+        this.outActors = new Set([o.taker]);
+        o.phase = 'fetch'; o.fetchT = 0;
+      }
+    } else if (o.phase === 'fetch') {
+      const p = o.taker;
+      if (dist(p.x, p.y, ball.x, ball.y) < 0.7 || (o.fetchT += dt) > OUT.giveUp) {
+        ref.goTo = null;
+        this.finishRestart(o);
+      }
+    }
+  }
+
+  placeFreekickBall() {
+    const o = this.out, ball = this.ball;
+    ball.held = null;
+    ball.reset(o.x, o.y);
+    ball.dead = true;
+  }
+
+  freekickTaker() {
+    const o = this.out;
+    return o.team.nearestTo(o.x, o.y, p => p.state === 'normal' && !p.isGK) || o.team.gk;
+  }
+
   // Ya en el punto: saque de banda con el balón por encima de la cabeza; córner y saque de puerta,
   // con el balón en el suelo. A partir de aquí, como siempre: hay que golpear (o saca solo).
   finishRestart(r) {
@@ -219,7 +331,19 @@ export class Match {
     taker.place(x, y);
     taker.carrying = false;
     taker.throwIn = kind === 'throw';
-    taker.faceTo(kind === 'corner' ? team.oppGoalX - team.dir * 11 : L / 2, CY);
+    taker.faceTo(kind === 'corner' ? team.oppGoalX - team.dir * 11 : kind === 'freekick' ? team.oppGoalX : L / 2, CY);
+    // Saques de banda, de esquina y de puerta: no hay fuera de juego en ese golpeo.
+    taker.restartKick = kind === 'throw' || kind === 'corner' || kind === 'goalkick';
+    if (kind === 'freekick') {
+      // En la falta, los rivales a 9,15 m del balón.
+      for (const o2 of team.opponent.players) {
+        const d = dist(o2.x, o2.y, x, y);
+        if (d < PITCH.centerRadius && !o2.isGK) {
+          const k = PITCH.centerRadius / (d || 1);
+          o2.place(x + (o2.x - x) * k, y + (o2.y - y) * k + (d === 0 ? PITCH.centerRadius : 0));
+        }
+      }
+    }
     ball.dead = false; ball.inCrowd = false;
     this.giveBall(taker, true);
     // El balón, ya en su sitio: encima de la cabeza (banda) o en el suelo delante del pie.
@@ -285,6 +409,8 @@ export class Match {
   }
 
   onKick(p, type) {
+    this.offsideOnKick(p);
+    if (this.state !== 'play' && this.state !== 'restart' && this.state !== 'kickoff') return;
     if (type === 'shot') this.stats.shots[p.team === this.home ? 0 : 1]++;
     sfx.kick(type === 'shot' ? 1 : type === 'loft' ? 0.8 : 0.55);
   }
@@ -301,6 +427,7 @@ export class Match {
       // Los jugadores siguen moviéndose un poco (celebración / vuelta).
       for (const p of this.players) { p.mx *= 0.9; p.my *= 0.9; p.update(dt); }
       this.referee.update(dt, this.ball);
+      for (const l of this.linesmen) l.update(dt, this.ball);
       this.ball.update(dt);
       if (this.stateT <= 0) this.afterPause();
       return;
@@ -327,6 +454,7 @@ export class Match {
     if (this.state === 'out') this.outMove();
     for (const p of this.players) p.update(dt);
     this.referee.update(dt, this.ball);
+    for (const l of this.linesmen) l.update(dt, this.ball);
 
     this.dribble(dt);
     const ev = this.ball.update(dt);
@@ -342,6 +470,8 @@ export class Match {
       if (owner) this.stats.possession[owner.team === this.home ? 0 : 1] += dt;
       this.contacts(dt);
       if (this.ball.onPost) { sfx.post(); this.ball.onPost = false; }
+      if (this.state === 'play') this.checkOffside();
+      if (this.state !== 'play') return;
       if (ev) this.handleEvent(ev);
       else if (this.clock >= this.halfDuration && !this.training) this.endHalf();
     }
@@ -369,6 +499,14 @@ export class Match {
     const ball = this.ball;
     const p = ball.owner;
     ball.attached = false;
+    if (ball.held) {
+      // En las manos del árbitro (tras un fuera de juego), a media altura.
+      const h = ball.held;
+      ball.x = h.x + h.fx * 0.3; ball.y = h.y + h.fy * 0.3; ball.z = OUT.carryHeight;
+      ball.vx = ball.vy = ball.vz = 0;
+      ball.attached = true;
+      return;
+    }
     if (!p) return;
     // El portero no suelta el balón al levantarse de una estirada.
     const holding = p.state === 'dive' || p.state === 'jump' || (p.isGK && p.state === 'getup');

@@ -109,7 +109,7 @@ export const FATIGUE = {
   levels: [0.8, 0.6, 0.4, 0.2],       // energía mínima de los niveles 0..3 (por debajo de 0.2, nivel 4)
   speed: [1, 0.97, 0.93, 0.85, 0.55], // velocidad máxima en cada nivel (en rojo, apenas corre)
   accel: [1, 0.97, 0.92, 0.82, 0.6],  // y aceleración
-  drain: 0.020,                       // gasto por minuto de partido corriendo a tope
+  drain: 0.030,                       // gasto por minuto de partido corriendo a tope
   ballDrain: 1.3,                     // conducir el balón cansa algo más
   burstDrain: 3,                      // y el acelerón, mucho más
   sprintDrain: 2,                     // esprintar cansa el doble

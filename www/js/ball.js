@@ -16,6 +16,7 @@ export class Ball {
     this.attached = false;  // pegada al jugador: en las manos del portero o esperando un saque
     this.lastTouch = null;  // último jugador que la tocó
     this.inNet = null;      // 'left' | 'right' cuando ha entrado en una portería
+    this.held = null;       // en las manos del árbitro (tras un fuera de juego)
     this.dead = false;      // fuera de juego: rueda libre hasta pararse, rebota en las vallas o vuelve de la grada
     this.returning = false; // volviendo de la grada por encima de la valla
     this.inCrowd = false;   // se ha ido a la grada (no se ve hasta que el público lo devuelve)
